@@ -1,0 +1,8 @@
+{
+  "name": "EcoBot Air Quality Monitor",
+  "description": "A real-time air quality monitoring application with an AI assistant.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}
