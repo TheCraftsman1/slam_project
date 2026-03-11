@@ -1,20 +1,56 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# EcoBot (SLAM Project)
 
-# Run and deploy your AI Studio app
+An AI-powered Eco-Assistant app that provides real-time Air Quality Index (AQI) tracking, interactive environmental maps, and voice-enabled AI assistance to help users make eco-friendly and health-conscious decisions.
 
-This contains everything you need to run your app locally.
+## 🌟 Features
 
-View your app in AI Studio: https://ai.studio/apps/4ca69558-091a-48b3-b204-c388c56c59ce
+- **🗺️ Real-Time AQI Map**: Interactive global map displaying Air Quality data powered by Google Maps and Open-Meteo API.
+- **🎙️ Voice-Activated AI Assistant**: Talk to EcoBot using your voice (native Web Speech API) and hear it talk back with high-quality Microsoft AriaNeural text-to-speech (`edge-tts`).
+- **🤖 Local AI Ready**: Smart backend that seamlessly switches between a fast fallback rule-engine and a fully offline LLM (Ollama) when available.
+- **📱 Modern UI**: Fully responsive, beautiful interface built with React and Tailwind CSS.
 
-## Run Locally
+## 🛠️ Tech Stack
 
-**Prerequisites:**  Node.js
+### Frontend
+- **React 19** & **TypeScript**
+- **Vite 6** (Build tool)
+- **Tailwind CSS 4** (Styling)
+- **Google Maps API** (`@react-google-maps/api`)
 
+### Backend
+- **Python 3** & **FastAPI**
+- **edge-tts** (High-quality voice generation)
+- **Ollama** (Local LLM integration, ready for Phi-3/Llama-3)
+- **httpx** (Async HTTP client)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 🚀 Getting Started
+
+### 1. Frontend Setup
+```bash
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
+```
+
+### 2. Backend Setup
+```bash
+# Navigate to the backend directory
+cd backend_ai
+
+# Create a virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the FastAPI server
+uvicorn main:app --reload
+```
+
+## 📝 Next Steps (Phase 4)
+- Predictive Air Quality forecasting.
+- Gamification (Eco-streaks and daily challenges).
+- Push notifications for health alerts.
