@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Mic, Plus, Minus, Crosshair, Layers, AlertTriangle, Bot, Navigation, ChevronUp, ChevronDown, MapPin, X, Loader2, Globe, Trash2, RefreshCw, Sparkles, Clock } from 'lucide-react';
+import { Search, Mic, Plus, Minus, Crosshair, Layers, AlertTriangle, Bot, Navigation, ChevronUp, ChevronDown, MapPin, X, Loader2, Globe, Trash2, RefreshCw, Sparkles, Clock, Box, RotateCcw } from 'lucide-react';
 import { GoogleMap, useJsApiLoader, OverlayView } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
 
-const GOOGLE_MAPS_API_KEY = "AIzaSyAbP_bF7fte-ru9MywNP08Ag7bpzmjBfh4";
+const GOOGLE_MAPS_API_KEY = "
+";
+const GOOGLE_MAP_ID = "dc9ce5fd592358c4efda7c27";
 
 const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#1a1f2e" }] },
@@ -134,6 +136,8 @@ export function MapScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [tappedLoading, setTappedLoading] = useState<string | null>(null);
   const [totalMarkersLoaded, setTotalMarkersLoaded] = useState(0);
+  const [is3D, setIs3D] = useState(false);
+  const [heading, setHeading] = useState(0);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─── Add a station with live AQI ────────────────────
@@ -280,7 +284,7 @@ export function MapScreen() {
     const result = await forwardGeocode(searchQuery);
     if (result) {
       map?.panTo({ lat: result.lat, lng: result.lng });
-      map?.setZoom(12);
+      map?.setZoom(is3D ? 18 : 12);
       await addStationRef.current(result.lat, result.lng, result.name);
       setSearchQuery('');
     }
@@ -290,7 +294,7 @@ export function MapScreen() {
   // ─── Quick-add a city ──────────────────────────────
   const handleQuickCity = async (city: typeof EXPLORE_CITIES[0]) => {
     map?.panTo({ lat: city.lat, lng: city.lng });
-    map?.setZoom(12);
+    map?.setZoom(is3D ? 18 : 12);
     await addStationRef.current(city.lat, city.lng, city.name);
     setShowCityPanel(false);
   };
@@ -305,7 +309,7 @@ export function MapScreen() {
         const loc = { lat, lng: lon };
         setCenter(loc);
         map?.panTo(loc);
-        map?.setZoom(14);
+        map?.setZoom(is3D ? 18 : 14);
         const name = await reverseGeocode(lat, lon);
         await addStationRef.current(lat, lon, name, { isUserLocation: true });
         setIsLocating(false);
@@ -375,12 +379,47 @@ export function MapScreen() {
     );
   };
 
+  // ─── 3D Toggle handler ─────────────────────────────
+  const toggle3D = useCallback(() => {
+    setIs3D(prev => {
+      const next = !prev;
+      if (map) {
+        if (next) {
+          // Enter 3D mode: zoom in, tilt camera, switch to satellite for best visuals
+          const currentZoom = map.getZoom() || 6;
+          if (currentZoom < 16) map.setZoom(18);
+          map.setTilt(45);
+          map.setHeading(heading);
+          setMapStyle('satellite');
+        } else {
+          // Exit 3D: flatten camera, go back to dark mode
+          map.setTilt(0);
+          map.setHeading(0);
+          setMapStyle('dark');
+        }
+      }
+      return next;
+    });
+  }, [map, heading]);
+
+  // ─── Rotate 3D view ────────────────────────────────
+  const rotate3D = useCallback((degrees: number) => {
+    setHeading(prev => {
+      const next = (prev + degrees) % 360;
+      if (map && is3D) map.setHeading(next);
+      return next;
+    });
+  }, [map, is3D]);
+
   const mapOptions = {
     disableDefaultUI: true,
-    styles: mapStyle === 'dark' ? darkMapStyle : [],
-    mapTypeId: mapStyle === 'satellite' ? 'satellite' : 'roadmap',
+    styles: (mapStyle === 'dark' && !is3D) ? darkMapStyle : [],
+    mapTypeId: mapStyle === 'satellite' ? (is3D ? 'hybrid' : 'satellite') : 'roadmap',
     gestureHandling: 'greedy' as const,
     clickableIcons: false,
+    mapId: GOOGLE_MAP_ID,
+    tilt: is3D ? 45 : 0,
+    heading: is3D ? heading : 0,
   };
 
   // ─── Loading state ────────────────────────────────
@@ -465,6 +504,51 @@ export function MapScreen() {
               <Globe size={18} />
             </button>
 
+            {/* 3D Toggle */}
+            <button
+              className={`p-3 rounded-2xl shadow-lg active:scale-90 transition-all flex items-center justify-center border ${is3D ? 'bg-gradient-to-br from-violet-500 to-blue-500 border-violet-400/40 text-white shadow-[0_4px_20px_rgba(139,92,246,0.4)]' : 'bg-white/[0.08] border-white/[0.08] text-slate-200'}`}
+              onClick={toggle3D}
+              title={is3D ? 'Exit 3D View' : 'Enter 3D View'}
+            >
+              <Box size={18} />
+            </button>
+
+            {/* Rotate buttons (only visible in 3D mode) */}
+            <AnimatePresence>
+              {is3D && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="flex flex-col bg-[#141820]/95 backdrop-blur-2xl border border-violet-500/20 rounded-2xl overflow-hidden shadow-2xl"
+                >
+                  <button
+                    className="p-3 text-violet-300 hover:bg-violet-500/10 active:scale-90 transition-all"
+                    onClick={() => rotate3D(45)}
+                    title="Rotate Right"
+                  >
+                    <RotateCcw size={16} className="scale-x-[-1]" />
+                  </button>
+                  <div className="h-px w-full bg-violet-500/10" />
+                  <button
+                    className="p-3 text-violet-300 hover:bg-violet-500/10 active:scale-90 transition-all"
+                    onClick={() => rotate3D(-45)}
+                    title="Rotate Left"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                  <div className="h-px w-full bg-violet-500/10" />
+                  <button
+                    className="p-2.5 text-violet-300 hover:bg-violet-500/10 active:scale-90 transition-all"
+                    onClick={() => { setHeading(0); if (map) map.setHeading(0); }}
+                    title="Reset Heading"
+                  >
+                    <span className="text-[10px] font-bold">N</span>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Layers */}
             <div className="relative">
               <button
@@ -477,7 +561,7 @@ export function MapScreen() {
                 {showLayers && (
                   <motion.div
                     initial={{ opacity: 0, x: 20, scale: 0.9 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 20, scale: 0.9 }}
-                    className="absolute right-14 top-0 bg-[#141820]/98 backdrop-blur-2xl border border-white/[0.08] rounded-2xl p-2 shadow-2xl flex flex-col gap-1 w-36"
+                    className="absolute right-14 top-0 bg-[#141820]/98 backdrop-blur-2xl border border-white/[0.08] rounded-2xl p-2 shadow-2xl flex flex-col gap-1 w-44"
                   >
                     {(['dark', 'light', 'satellite'] as const).map(style => (
                       <button key={style}
@@ -487,6 +571,22 @@ export function MapScreen() {
                         {style.charAt(0).toUpperCase() + style.slice(1)}
                       </button>
                     ))}
+                    <div className="h-px w-full bg-white/[0.06] my-1" />
+                    <button
+                      className={`px-4 py-2.5 text-sm text-left rounded-xl transition-all font-medium flex items-center gap-2 ${
+                        is3D && mapStyle === 'satellite' ? 'bg-violet-500/15 text-violet-400' : 'text-slate-300 hover:bg-white/[0.05]'
+                      }`}
+                      onClick={() => {
+                        setMapStyle('satellite');
+                        if (!is3D) toggle3D();
+                        const currentZoom = map?.getZoom() || 6;
+                        if (currentZoom < 16) map?.setZoom(18);
+                        setShowLayers(false);
+                      }}
+                    >
+                      <Box size={13} />
+                      3D Satellite
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -547,7 +647,7 @@ export function MapScreen() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
         >
-          <span className="text-[11px] font-semibold text-blue-300">👆 Tap anywhere on the map to check live AQI</span>
+          <span className="text-[11px] font-semibold text-blue-300">👆 Tap anywhere on the map to check live AQI  •  Tap 🧊 for 3D</span>
         </motion.div>
       )}
 
