@@ -3,9 +3,9 @@ import { Search, Mic, Plus, Minus, Crosshair, Layers, AlertTriangle, Bot, Naviga
 import { GoogleMap, useJsApiLoader, OverlayView } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
 
-const GOOGLE_MAPS_API_KEY = "
-";
+const GOOGLE_MAPS_API_KEY = "AIzaSyAbP_bF7fte-ru9MywNP08Ag7bpzmjBfh4";
 const GOOGLE_MAP_ID = "dc9ce5fd592358c4efda7c27";
+const BACKEND_URL = 'http://localhost:8000';
 
 const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#1a1f2e" }] },
@@ -42,6 +42,26 @@ interface AqiStation {
   lastFetched?: Date;
 }
 
+interface AddStationOptions {
+  isUserLocation?: boolean;
+  isTapped?: boolean;
+  autoSelect?: boolean;
+}
+
+interface IareBuilding {
+  name: string;
+  lat: number;
+  lng: number;
+  type: string;
+}
+
+interface IareCollegeData {
+  name: string;
+  fullName: string;
+  center: { lat: number; lng: number };
+  buildings: IareBuilding[];
+}
+
 type MetricKey = 'us_aqi' | 'pm2_5' | 'nitrogen_dioxide' | 'carbon_monoxide' | 'ozone' | 'sulphur_dioxide';
 
 const getAqiColor = (aqi: number) => {
@@ -73,6 +93,41 @@ const EXPLORE_CITIES = [
   { name: 'Singapore', lat: 1.3521, lng: 103.8198 },
 ];
 
+// ─── IARE College Buildings ─────────────────────────
+const DEFAULT_IARE_COLLEGE: IareCollegeData = {
+  name: 'IARE',
+  fullName: 'Institute of Aeronautical Engineering',
+  center: { lat: 17.6001, lng: 78.4175 },
+  buildings: [
+    { name: 'Bharadwaja Block', lat: 17.599903, lng: 78.416924, type: 'academic' },
+    { name: 'Abdul Kalam Block', lat: 17.599639, lng: 78.417294, type: 'academic' },
+    { name: 'Aryabhatta Block', lat: 17.599878, lng: 78.417661, type: 'academic' },
+    { name: '5th Block', lat: 17.599799, lng: 78.418182, type: 'academic' },
+    { name: 'IT Park', lat: 17.600183, lng: 78.418238, type: 'academic' },
+    { name: 'TIIC Center', lat: 17.600462, lng: 78.416978, type: 'facility' },
+    { name: 'IARE Canteen', lat: 17.600247, lng: 78.418606, type: 'facility' },
+    { name: 'Engineering Workshop', lat: 17.599523, lng: 78.418172, type: 'facility' },
+    { name: 'Indoor Badminton Court', lat: 17.600932, lng: 78.417066, type: 'sports' },
+    { name: 'Basketball Court', lat: 17.599784, lng: 78.418563, type: 'sports' },
+    { name: 'IARE Parking', lat: 17.600968, lng: 78.417310, type: 'facility' },
+    { name: 'Car Parking', lat: 17.600607, lng: 78.417410, type: 'facility' },
+    { name: 'Main Entrance', lat: 17.600372, lng: 78.416849, type: 'entrance' },
+  ]
+};
+
+const getBuildingIcon = (type: string) => {
+  switch (type) {
+    case 'academic': return '🏛️';
+    case 'library': return '📚';
+    case 'admin': return '🏢';
+    case 'facility': return '🏪';
+    case 'sports': return '🏟️';
+    case 'hostel': return '🏠';
+    case 'entrance': return '🚪';
+    default: return '📍';
+  }
+};
+
 // ─── Fetch AQI from open-meteo (real API) ────────────
 async function fetchAqiForLocation(lat: number, lng: number): Promise<any | null> {
   try {
@@ -84,20 +139,120 @@ async function fetchAqiForLocation(lat: number, lng: number): Promise<any | null
   } catch { return null; }
 }
 
+async function fetchIareCollegeData(): Promise<IareCollegeData | null> {
+  try {
+    const resp = await fetch(`${BACKEND_URL}/api/iare/buildings`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data?.center || !Array.isArray(data?.buildings)) return null;
+    return {
+      name: data.name || 'IARE',
+      fullName: data.full_name || data.fullName || 'Institute of Aeronautical Engineering',
+      center: data.center,
+      buildings: data.buildings,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchNearestIareBuilding(lat: number, lng: number): Promise<{ name: string; distance_m: number; is_near_campus: boolean } | null> {
+  try {
+    const resp = await fetch(`${BACKEND_URL}/api/iare/nearest?latitude=${lat}&longitude=${lng}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data?.nearest?.name) return null;
+    return {
+      name: data.nearest.name,
+      distance_m: data.nearest.distance_m ?? 99999,
+      is_near_campus: !!data.is_near_campus,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ─── Reverse geocode ────────────────────────────────
 async function reverseGeocode(lat: number, lng: number): Promise<string> {
+  const nearestIare = await fetchNearestIareBuilding(lat, lng);
+  if (nearestIare?.is_near_campus) {
+    if (nearestIare.distance_m <= 120) return nearestIare.name;
+    return 'IARE Campus';
+  }
+
   try {
-    const resp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`);
+    const resp = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+    );
     const data = await resp.json();
+
     if (data?.results?.length > 0) {
-      return data.results[0].address_components.find((c: any) => c.types.includes('locality'))?.long_name ||
-        data.results[0].address_components.find((c: any) => c.types.includes('sublocality'))?.long_name ||
-        data.results[0].address_components.find((c: any) => c.types.includes('administrative_area_level_2'))?.long_name ||
-        data.results[0].address_components.find((c: any) => c.types.includes('administrative_area_level_1'))?.long_name ||
-        'Unknown Location';
+      // Helper to check if string is a Plus Code (e.g., "HCX8+XQH")
+      const isPlusCode = (str: string) => /^[A-Z0-9]{4,}\+[A-Z0-9]+$/i.test(str?.trim() || '');
+
+      // Priority 1: Look for POI/establishment/premise result
+      for (const result of data.results) {
+        const types = result.types || [];
+        if (types.some((t: string) => ['point_of_interest', 'establishment', 'premise', 'subpremise'].includes(t))) {
+          // Get first part of formatted_address (usually the place name)
+          const parts = result.formatted_address?.split(',') || [];
+          for (const part of parts) {
+            const trimmed = part.trim();
+            if (trimmed && !isPlusCode(trimmed) && trimmed.length < 60) {
+              return trimmed;
+            }
+          }
+        }
+      }
+
+      // Priority 2: Search all results for a good name
+      for (const result of data.results) {
+        const components = result.address_components || [];
+
+        // Try to find premise, neighborhood, or route
+        for (const comp of components) {
+          const types = comp.types || [];
+          if (types.includes('premise') || types.includes('neighborhood') || types.includes('route')) {
+            if (!isPlusCode(comp.long_name)) {
+              return comp.long_name;
+            }
+          }
+        }
+      }
+
+      // Priority 3: Get sublocality or locality
+      const first = data.results[0];
+      const components = first.address_components || [];
+
+      for (const comp of components) {
+        const types = comp.types || [];
+        if (types.includes('sublocality_level_1') || types.includes('sublocality')) {
+          if (!isPlusCode(comp.long_name)) return comp.long_name;
+        }
+      }
+
+      for (const comp of components) {
+        if (comp.types?.includes('locality') && !isPlusCode(comp.long_name)) {
+          return comp.long_name;
+        }
+      }
+
+      // Priority 4: First non-Plus-Code part of any formatted_address
+      for (const result of data.results) {
+        const parts = result.formatted_address?.split(',') || [];
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (trimmed && !isPlusCode(trimmed) && trimmed.length < 60 && trimmed.length > 2) {
+            return trimmed;
+          }
+        }
+      }
     }
     return 'Unknown Location';
-  } catch { return 'Unknown Location'; }
+  } catch (err) {
+    console.error('Geocode error:', err);
+    return 'Unknown Location';
+  }
 }
 
 // ─── Forward geocode ────────────────────────────────
@@ -133,15 +288,112 @@ export function MapScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [showCityPanel, setShowCityPanel] = useState(false);
+  const [showCollegePanel, setShowCollegePanel] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [tappedLoading, setTappedLoading] = useState<string | null>(null);
   const [totalMarkersLoaded, setTotalMarkersLoaded] = useState(0);
   const [is3D, setIs3D] = useState(false);
   const [heading, setHeading] = useState(0);
+  const [iareCollege, setIareCollege] = useState<IareCollegeData>(DEFAULT_IARE_COLLEGE);
+  const [aiInsight, setAiInsight] = useState<{ loading: boolean; text: string | null }>({ loading: false, text: null });
+  const [currentZoom, setCurrentZoom] = useState(6);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const insightRequestIdRef = useRef(0);
+  const insightCacheRef = useRef<Map<string, string>>(new Map());
+  const insightAbortRef = useRef<AbortController | null>(null);
+
+  // ─── Fetch AI Insight ──────────────────────────────
+  const fetchAiInsight = async (station: AqiStation) => {
+    const cacheKey = `${station.id}:${station.aqi}`;
+    const cachedInsight = insightCacheRef.current.get(cacheKey);
+    if (cachedInsight) {
+      setAiInsight({ loading: false, text: cachedInsight });
+      return;
+    }
+
+    if (insightAbortRef.current) {
+      insightAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    insightAbortRef.current = controller;
+
+    const requestId = ++insightRequestIdRef.current;
+    setAiInsight({ loading: true, text: null });
+    try {
+      const resp = await fetch('http://localhost:8000/api/ask-ecobot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          user_voice_text: "Give one short, specific safety insight for this spot.",
+          current_aqi: station.aqi,
+          location: station.name,
+          latitude: station.lat,
+          longitude: station.lng,
+          response_style: 'map_fast'
+        })
+      });
+      if (resp.ok) {
+        const reader = resp.body?.getReader();
+        if (!reader) throw new Error('No stream reader');
+
+        const decoder = new TextDecoder('utf-8');
+        let fullReply = '';
+        let isDone = false;
+
+        while (!isDone) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const dataStr = line.slice(6);
+            if (dataStr === '[DONE]') {
+              isDone = true;
+              break;
+            }
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed?.text) {
+                fullReply += parsed.text;
+                if (requestId === insightRequestIdRef.current) {
+                  setAiInsight({ loading: true, text: fullReply });
+                }
+              }
+            } catch {
+              // Ignore malformed SSE lines
+            }
+          }
+        }
+
+        if (requestId === insightRequestIdRef.current) {
+          const finalText = fullReply || `AQI in ${station.name} is ${station.aqi}.`;
+          setAiInsight({ loading: false, text: finalText });
+          insightCacheRef.current.set(cacheKey, finalText);
+        }
+      } else {
+        throw new Error('Fallback');
+      }
+    } catch {
+      // Offline fallback
+      let advice = "";
+      if (station.aqi > 150) advice = `Air in ${station.name} is unhealthy. Avoid outdoor activity and wear an N95 mask.`;
+      else if (station.aqi > 100) advice = `${station.name} has moderate-to-poor air. Sensitive groups limit exertion.`;
+      else if (station.aqi > 50) advice = `Air quality is acceptable. Light outdoor activity is fine.`;
+      else advice = `Excellent air quality in ${station.name}! AI local server is offline, but it looks safe.`;
+      if (requestId === insightRequestIdRef.current) {
+        setAiInsight({ loading: false, text: advice });
+      }
+    }
+  };
 
   // ─── Add a station with live AQI ────────────────────
-  const addStation = useCallback(async (lat: number, lng: number, name: string, opts?: { isUserLocation?: boolean; isTapped?: boolean }) => {
+  const addStation = useCallback(async (lat: number, lng: number, name: string, opts?: AddStationOptions) => {
+    const shouldAutoSelect = opts?.autoSelect !== false;
     const id = `${lat.toFixed(4)}_${lng.toFixed(4)}`;
     
     // Don't add duplicates (within ~500m)
@@ -149,8 +401,9 @@ export function MapScreen() {
     if (exists) {
       // Select the existing one instead
       const existing = stations.find(s => Math.abs(s.lat - lat) < 0.005 && Math.abs(s.lng - lng) < 0.005);
-      if (existing) {
+      if (existing && shouldAutoSelect) {
         setSelectedStation(existing);
+        fetchAiInsight(existing);
         setIsSheetExpanded(true);
       }
       return;
@@ -170,8 +423,11 @@ export function MapScreen() {
     setTotalMarkersLoaded(prev => prev + 1);
     setTappedLoading(null);
 
-    setSelectedStation(complete);
-    setIsSheetExpanded(true);
+    if (shouldAutoSelect) {
+      setSelectedStation(complete);
+      fetchAiInsight(complete);
+      setIsSheetExpanded(true);
+    }
   }, [stations]);
 
   // ─── Refresh a single station ──────────────────────
@@ -223,12 +479,24 @@ export function MapScreen() {
       // Use a function ref because addStation captures stale state
       addStationRef.current(lat, lng, name, { isTapped: true });
     });
+    // Track zoom changes for building label visibility
+    map.addListener('zoom_changed', () => {
+      setCurrentZoom(map.getZoom() || 6);
+    });
   }, []);
   
   const addStationRef = useRef(addStation);
   useEffect(() => { addStationRef.current = addStation; }, [addStation]);
 
   const onUnmount = useCallback(() => setMap(null), []);
+
+  useEffect(() => {
+    const loadIareData = async () => {
+      const data = await fetchIareCollegeData();
+      if (data) setIareCollege(data);
+    };
+    loadIareData();
+  }, []);
 
   // ─── Init: user location + some nearby cities ──────
   useEffect(() => {
@@ -245,6 +513,11 @@ export function MapScreen() {
           async () => {
             // Fallback: start with Vizag
             addStationRef.current(17.6868, 83.2185, 'Visakhapatnam', { isUserLocation: true });
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
           }
         );
       } else {
@@ -264,7 +537,7 @@ export function MapScreen() {
       for (let i = 0; i < preloadCities.length; i++) {
         await new Promise(r => setTimeout(r, 400));
         const c = preloadCities[i];
-        addStationRef.current(c.lat, c.lng, c.name);
+        addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
       }
     };
     init();
@@ -281,6 +554,33 @@ export function MapScreen() {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     setIsSearching(true);
+
+    // First check if searching for a college building
+    const query = searchQuery.toLowerCase().trim();
+    const matchingBuilding = iareCollege.buildings.find(b =>
+      b.name.toLowerCase().includes(query) ||
+      query.includes(b.name.toLowerCase().split(' ')[0]) // Match first word like "bharadwaja"
+    );
+
+    if (matchingBuilding) {
+      // Found a college building match
+      map?.panTo({ lat: matchingBuilding.lat, lng: matchingBuilding.lng });
+      map?.setZoom(is3D ? 19 : 18);
+      await addStationRef.current(matchingBuilding.lat, matchingBuilding.lng, matchingBuilding.name, { isTapped: true });
+      setSearchQuery('');
+      setIsSearching(false);
+      return;
+    }
+
+    // Check if searching for IARE/college
+    if (query.includes('iare') || query.includes('college') || query.includes('campus')) {
+      goToCollege();
+      setSearchQuery('');
+      setIsSearching(false);
+      return;
+    }
+
+    // Otherwise do normal geocode search
     const result = await forwardGeocode(searchQuery);
     if (result) {
       map?.panTo({ lat: result.lat, lng: result.lng });
@@ -299,6 +599,22 @@ export function MapScreen() {
     setShowCityPanel(false);
   };
 
+  // ─── Quick-add a college building ────────────────────
+  const handleCollegeBuilding = async (building: IareBuilding) => {
+    map?.panTo({ lat: building.lat, lng: building.lng });
+    map?.setZoom(is3D ? 19 : 18); // Zoom in close for buildings
+    await addStationRef.current(building.lat, building.lng, building.name, { isTapped: true });
+    setShowCollegePanel(false);
+  };
+
+  // ─── Go to college center ────────────────────────────
+  const goToCollege = () => {
+    map?.panTo(iareCollege.center);
+    map?.setZoom(is3D ? 18 : 17);
+    setMapStyle('satellite'); // Satellite view for better campus visibility
+    setShowCollegePanel(true);
+  };
+
   // ─── Locate me ────────────────────────────────────
   const handleLocateMe = () => {
     if (!("geolocation" in navigator)) return;
@@ -314,7 +630,12 @@ export function MapScreen() {
         await addStationRef.current(lat, lon, name, { isUserLocation: true });
         setIsLocating(false);
       },
-      () => setIsLocating(false)
+      () => setIsLocating(false),
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
     );
   };
 
@@ -335,46 +656,62 @@ export function MapScreen() {
 
     return (
       <div
-        className="flex flex-col items-center -translate-x-1/2 -translate-y-full cursor-pointer group"
+        className="flex flex-col items-center -translate-x-1/2 -translate-y-1/2 cursor-pointer group"
         onClick={(e) => {
           e.stopPropagation();
           setSelectedStation(station);
+          fetchAiInsight(station);
           setIsSheetExpanded(true);
         }}
       >
-        {/* City label */}
-        <div className={`mb-1 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all ${
-          isSelected ? 'bg-blue-500/20 text-blue-300' : 'bg-black/40 text-slate-400'
-        } backdrop-blur-md max-w-[100px] truncate`}>
+        {/* Glow Aura / Radar ping */}
+        {station.loading ? (
+          <div className="absolute inset-0 rounded-full bg-blue-500/20 blur-xl animate-pulse scale-150" />
+        ) : (
+          <div 
+            className={`absolute inset-0 rounded-full blur-xl opacity-40 transition-all duration-700 ${isSelected ? 'scale-[2.5] opacity-70' : 'scale-150 group-hover:scale-[2]'} ${colors.bg}`} 
+          />
+        )}
+        
+        {/* Radar Ring (selected only) */}
+        {isSelected && (
+          <div className={`absolute inset-[-20px] rounded-full border border-white/20 animate-ping opacity-30`} />
+        )}
+
+        {/* City label - Floating above */}
+        <div className={`absolute -top-8 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all shadow-lg ${
+          isSelected ? 'bg-blue-500/90 text-white shadow-blue-500/30' : 'bg-black/60 text-slate-300 backdrop-blur-md opacity-0 group-hover:opacity-100'
+        } whitespace-nowrap z-20`}>
           {station.name}
         </div>
         
-        {/* AQI Bubble */}
-        <div className={`relative bg-[#141820]/95 backdrop-blur-xl border-2 ${isSelected ? 'border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.25)]' : colors.border} px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-2 transition-all duration-300 ${isSelected ? 'scale-110' : 'group-hover:scale-105'}`}
-          style={{ boxShadow: isSelected ? undefined : `0 4px 20px ${colors.hex}20` }}
+        {/* 3D-Like AQI Node */}
+        <div className={`relative z-10 w-12 h-12 rounded-full backdrop-blur-md border-[3px] flex items-center justify-center transition-all duration-500 shadow-2xl ${
+          isSelected ? 'border-white/90 scale-110' : `${colors.border} scale-100 group-hover:scale-105`
+        }`}
+          style={{ 
+            background: isSelected ? 'rgba(15, 23, 41, 0.85)' : 'rgba(20, 24, 32, 0.75)',
+            boxShadow: `0 ${isSelected ? '10px' : '4px'} 25px ${isSelected ? '#ffffff30' : colors.hex + '40'}, inset 0 0 15px ${colors.hex}30` 
+          }}
         >
           {station.loading ? (
-            <Loader2 size={14} className="text-blue-400 animate-spin" />
+            <Loader2 size={16} className="text-blue-400 animate-spin" />
           ) : (
-            <div className="relative">
-              <div className={`w-2.5 h-2.5 rounded-full ${colors.bg}`} />
-              <div className={`absolute inset-0 w-2.5 h-2.5 rounded-full ${colors.bg} animate-ping opacity-40`} />
+            <div className="flex flex-col items-center justify-center">
+              <span className={`text-sm font-black tabular-nums tracking-tighter ${isSelected ? 'text-white' : colors.text}`} style={{ textShadow: `0 0 10px ${colors.hex}` }}>
+                {displayValue}
+              </span>
             </div>
           )}
-          <span className="text-sm font-bold text-white tabular-nums">{displayValue}</span>
-          {unit && <span className="text-[8px] text-slate-400">{unit}</span>}
           
           {/* User location badge */}
           {station.isUserLocation && (
-            <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-blue-500 border border-[#141820]" />
+            <div className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-blue-500 border-2 border-[#141820]" />
           )}
         </div>
         
-        {/* Stem */}
-        <div className={`w-0.5 h-4 ${isSelected ? 'bg-blue-400/40' : 'bg-gradient-to-b from-white/15 to-transparent'}`} />
-        <div className={`w-3 h-3 rounded-full ${isSelected ? 'bg-blue-500' : colors.bg} shadow-lg`}
-          style={{ boxShadow: `0 0 8px ${isSelected ? '#3b82f680' : colors.hex + '50'}` }}
-        />
+        {/* Shadow floor base */}
+        <div className="w-6 h-1.5 mt-2 bg-black/60 rounded-full blur-[2px]" />
       </div>
     );
   };
@@ -461,98 +798,119 @@ export function MapScreen() {
             </OverlayView>
           ))}
 
+          {/* ─── IARE Building Labels (visible when zoomed in) ─── */}
+          {currentZoom >= 16 && iareCollege.buildings.map(building => (
+            <OverlayView
+              key={`building-${building.name}`}
+              position={{ lat: building.lat, lng: building.lng }}
+              mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+            >
+              <div
+                className="-translate-x-1/2 -translate-y-1/2 cursor-pointer hover:scale-105 transition-transform"
+                onClick={() => handleCollegeBuilding(building)}
+              >
+                <div className="px-2 py-1 rounded bg-white/95 shadow-md border border-gray-200">
+                  <span className="text-[10px] font-semibold text-gray-800 whitespace-nowrap">
+                    {building.name}
+                  </span>
+                </div>
+              </div>
+            </OverlayView>
+          ))}
+
           {/* ─── Map Controls ────────────────────── */}
-          <div className={`absolute right-3 transition-all duration-500 z-[500] flex flex-col gap-2 pointer-events-auto ${isSheetExpanded ? 'bottom-[380px]' : 'bottom-[130px]'}`}>
+          <div className="absolute right-4 top-[140px] transition-all duration-500 z-[400] flex flex-col gap-3 pointer-events-auto mt-6">
             {/* Live Counter */}
-            <div className="bg-[#141820]/95 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-3 py-2 shadow-2xl flex items-center gap-2 mb-1">
+            <div className="bg-[#141820]/95 backdrop-blur-3xl border border-white/[0.08] rounded-2xl px-3 py-2 shadow-2xl flex items-center gap-2 mb-2">
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <span className="text-[10px] font-bold text-slate-300">{stations.filter(s => !s.loading).length} Live</span>
             </div>
 
-            <div className="flex flex-col bg-[#141820]/95 backdrop-blur-2xl border border-white/[0.08] rounded-2xl overflow-hidden shadow-2xl">
-              <button className="p-3 text-slate-200 hover:bg-white/[0.08] active:scale-90 transition-all" onClick={() => map?.setZoom((map.getZoom() || 6) + 1)}>
+            <div className="flex flex-col bg-[#141820]/80 backdrop-blur-xl border border-white/[0.1] rounded-2xl overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
+              <button className="p-3.5 text-slate-200 hover:bg-white/[0.1] active:bg-white/[0.15] transition-all" onClick={() => map?.setZoom((map.getZoom() || 6) + 1)}>
                 <Plus size={18} />
               </button>
-              <div className="h-px w-full bg-white/[0.06]" />
-              <button className="p-3 text-slate-200 hover:bg-white/[0.08] active:scale-90 transition-all" onClick={() => map?.setZoom((map.getZoom() || 6) - 1)}>
+              <div className="h-px w-full bg-white/[0.1]" />
+              <button className="p-3.5 text-slate-200 hover:bg-white/[0.1] active:bg-white/[0.15] transition-all" onClick={() => map?.setZoom((map.getZoom() || 6) - 1)}>
                 <Minus size={18} />
               </button>
             </div>
 
             <button
-              className={`bg-[#141820]/95 backdrop-blur-2xl border border-white/[0.08] p-3 rounded-2xl shadow-2xl hover:bg-white/[0.08] active:scale-90 transition-all ${isLocating ? 'text-blue-400' : 'text-slate-200'}`}
+              className={`bg-[#141820]/80 backdrop-blur-xl border border-white/[0.1] p-3.5 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] hover:bg-white/[0.1] active:scale-95 transition-all ${isLocating ? 'text-blue-400' : 'text-slate-200'}`}
               onClick={handleLocateMe}
             >
               <Crosshair size={18} className={isLocating ? 'animate-pulse' : ''} />
             </button>
 
-            {/* Refresh All */}
-            <button
-              className="bg-[#141820]/95 backdrop-blur-2xl border border-white/[0.08] p-3 rounded-2xl shadow-2xl hover:bg-white/[0.08] active:scale-90 transition-all text-slate-200"
-              onClick={refreshAllStations}
-              title="Refresh all stations"
-            >
-              <RefreshCw size={18} />
-            </button>
-
             {/* Explore Cities */}
             <button
-              className={`p-3 rounded-2xl shadow-lg active:scale-90 transition-all flex items-center justify-center ${showCityPanel ? 'bg-blue-500 text-white' : 'bg-blue-500/90 text-white'}`}
+              className={`p-3.5 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] active:scale-95 transition-all flex items-center justify-center ${showCityPanel ? 'bg-blue-500 text-white' : 'bg-[#141820]/80 backdrop-blur-xl border border-white/[0.1] text-slate-200 hover:bg-white/[0.1]'}`}
               onClick={() => setShowCityPanel(!showCityPanel)}
-              style={{ boxShadow: '0 4px 15px rgba(59,130,246,0.3)' }}
+              style={showCityPanel ? { boxShadow: '0 8px 30px rgba(59,130,246,0.4)' } : {}}
             >
               <Globe size={18} />
             </button>
 
+            {/* College Quick Access */}
+            <button
+              className={`p-3.5 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] active:scale-95 transition-all flex items-center justify-center ${showCollegePanel ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-emerald-400/40' : 'bg-[#141820]/80 backdrop-blur-xl border border-white/[0.1] text-slate-200 hover:bg-white/[0.1]'}`}
+              onClick={goToCollege}
+              style={showCollegePanel ? { boxShadow: '0 8px 30px rgba(16,185,129,0.4)' } : {}}
+              title="IARE Campus"
+            >
+              <span className="text-base">🎓</span>
+            </button>
+
             {/* 3D Toggle */}
             <button
-              className={`p-3 rounded-2xl shadow-lg active:scale-90 transition-all flex items-center justify-center border ${is3D ? 'bg-gradient-to-br from-violet-500 to-blue-500 border-violet-400/40 text-white shadow-[0_4px_20px_rgba(139,92,246,0.4)]' : 'bg-white/[0.08] border-white/[0.08] text-slate-200'}`}
+              className={`p-3.5 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] active:scale-95 transition-all flex items-center justify-center border ${is3D ? 'bg-gradient-to-br from-violet-600 to-blue-600 border-violet-400/40 text-white shadow-[0_8px_30px_rgba(139,92,246,0.5)]' : 'bg-[#141820]/80 backdrop-blur-xl border-white/[0.1] text-slate-200 hover:bg-white/[0.1]'}`}
               onClick={toggle3D}
               title={is3D ? 'Exit 3D View' : 'Enter 3D View'}
             >
-              <Box size={18} />
+              <Box size={18} className={is3D ? 'animate-pulse' : ''} />
             </button>
 
             {/* Rotate buttons (only visible in 3D mode) */}
             <AnimatePresence>
               {is3D && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex flex-col bg-[#141820]/95 backdrop-blur-2xl border border-violet-500/20 rounded-2xl overflow-hidden shadow-2xl"
+                  initial={{ opacity: 0, x: 20, scale: 0.8 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  exit={{ opacity: 0, x: 20, scale: 0.8 }}
+                  className="flex flex-col bg-[#141820]/90 backdrop-blur-xl border border-violet-500/30 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.5)] mt-1"
                 >
                   <button
-                    className="p-3 text-violet-300 hover:bg-violet-500/10 active:scale-90 transition-all"
+                    className="p-3 text-violet-300 hover:bg-violet-500/20 active:bg-violet-500/30 transition-all font-bold"
                     onClick={() => rotate3D(45)}
                     title="Rotate Right"
                   >
                     <RotateCcw size={16} className="scale-x-[-1]" />
                   </button>
-                  <div className="h-px w-full bg-violet-500/10" />
+                  <div className="h-px w-full bg-violet-500/20" />
                   <button
-                    className="p-3 text-violet-300 hover:bg-violet-500/10 active:scale-90 transition-all"
+                    className="p-3 text-violet-300 hover:bg-violet-500/20 active:bg-violet-500/30 transition-all font-bold"
                     onClick={() => rotate3D(-45)}
                     title="Rotate Left"
                   >
                     <RotateCcw size={16} />
                   </button>
-                  <div className="h-px w-full bg-violet-500/10" />
+                  <div className="h-px w-full bg-violet-500/20" />
                   <button
-                    className="p-2.5 text-violet-300 hover:bg-violet-500/10 active:scale-90 transition-all"
+                    className="p-2.5 text-violet-300 hover:bg-violet-500/20 active:bg-violet-500/30 transition-all flex justify-center items-center"
                     onClick={() => { setHeading(0); if (map) map.setHeading(0); }}
                     title="Reset Heading"
                   >
-                    <span className="text-[10px] font-bold">N</span>
+                    <Navigation size={14} className="text-violet-400" />
                   </button>
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* Layers */}
-            <div className="relative">
+            <div className="relative mt-auto">
               <button
-                className={`p-3 rounded-2xl shadow-lg active:scale-90 transition-all flex items-center justify-center bg-white/[0.08] border border-white/[0.08] text-slate-200`}
+                className={`p-3.5 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] active:scale-95 transition-all flex items-center justify-center bg-[#141820]/80 backdrop-blur-xl border border-white/[0.1] text-slate-200 hover:bg-white/[0.1]`}
                 onClick={() => setShowLayers(!showLayers)}
               >
                 <Layers size={18} />
@@ -561,32 +919,16 @@ export function MapScreen() {
                 {showLayers && (
                   <motion.div
                     initial={{ opacity: 0, x: 20, scale: 0.9 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 20, scale: 0.9 }}
-                    className="absolute right-14 top-0 bg-[#141820]/98 backdrop-blur-2xl border border-white/[0.08] rounded-2xl p-2 shadow-2xl flex flex-col gap-1 w-44"
+                    className="absolute right-14 bottom-0 bg-[#141820]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl p-2 shadow-[0_15px_50px_rgba(0,0,0,0.7)] flex flex-col gap-1 w-44"
                   >
                     {(['dark', 'light', 'satellite'] as const).map(style => (
                       <button key={style}
-                        className={`px-4 py-2.5 text-sm text-left rounded-xl transition-all font-medium ${mapStyle === style ? 'bg-blue-500/15 text-blue-400' : 'text-slate-300 hover:bg-white/[0.05]'}`}
+                        className={`px-4 py-3 text-sm text-left rounded-xl transition-all font-bold ${mapStyle === style ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-300 hover:bg-white/[0.08]'}`}
                         onClick={() => { setMapStyle(style); setShowLayers(false); }}
                       >
                         {style.charAt(0).toUpperCase() + style.slice(1)}
                       </button>
                     ))}
-                    <div className="h-px w-full bg-white/[0.06] my-1" />
-                    <button
-                      className={`px-4 py-2.5 text-sm text-left rounded-xl transition-all font-medium flex items-center gap-2 ${
-                        is3D && mapStyle === 'satellite' ? 'bg-violet-500/15 text-violet-400' : 'text-slate-300 hover:bg-white/[0.05]'
-                      }`}
-                      onClick={() => {
-                        setMapStyle('satellite');
-                        if (!is3D) toggle3D();
-                        const currentZoom = map?.getZoom() || 6;
-                        if (currentZoom < 16) map?.setZoom(18);
-                        setShowLayers(false);
-                      }}
-                    >
-                      <Box size={13} />
-                      3D Satellite
-                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -639,6 +981,59 @@ export function MapScreen() {
         )}
       </AnimatePresence>
 
+      {/* ─── IARE College Buildings Panel ─────────────── */}
+      <AnimatePresence>
+        {showCollegePanel && (
+          <motion.div
+            initial={{ opacity: 0, x: 100 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 100 }}
+            className="absolute top-20 right-3 z-[600] bg-[#0d1a1f]/98 backdrop-blur-2xl border border-emerald-500/20 rounded-3xl p-4 shadow-2xl w-64 max-h-[70vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎓</span>
+                <div>
+                  <span className="text-xs font-bold text-white block">{iareCollege.name}</span>
+                  <span className="text-[9px] text-emerald-400/70">{iareCollege.fullName}</span>
+                </div>
+              </div>
+              <button onClick={() => setShowCollegePanel(false)} className="text-slate-500 hover:text-white transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+
+            <p className="text-[10px] text-slate-500 mb-3">Tap a building to check AQI at that location</p>
+
+            {/* Building categories */}
+            <div className="flex flex-col gap-1">
+              {iareCollege.buildings.map(building => {
+                const exists = stations.some(s => Math.abs(s.lat - building.lat) < 0.0005 && Math.abs(s.lng - building.lng) < 0.0005);
+                return (
+                  <button
+                    key={building.name}
+                    onClick={() => handleCollegeBuilding(building)}
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all active:scale-95 ${
+                      exists ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' : 'hover:bg-white/[0.05] text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">{getBuildingIcon(building.type)}</span>
+                      <span className="text-xs font-semibold">{building.name}</span>
+                    </div>
+                    {exists ? (
+                      <span className="text-[9px] font-bold text-emerald-400 tabular-nums">
+                        AQI {stations.find(s => Math.abs(s.lat - building.lat) < 0.0005)?.aqi || '...'}
+                      </span>
+                    ) : (
+                      <span className="text-[8px] text-slate-600 uppercase">{building.type}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ─── Tap Instruction Toast ────────────────── */}
       {stations.length <= 1 && (
         <motion.div
@@ -662,7 +1057,7 @@ export function MapScreen() {
             )}
             <input
               className="bg-transparent border-none focus:outline-none text-white placeholder:text-slate-500 w-full text-sm font-medium"
-              placeholder="Search Vizag, Delhi, Tokyo..."
+              placeholder="Search cities or IARE buildings..."
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -699,14 +1094,24 @@ export function MapScreen() {
 
       {/* ─── Bottom Sheet ─────────────────────────── */}
       <motion.div
-        className="bg-[#0f1729]/98 backdrop-blur-2xl rounded-t-[2rem] border-t border-white/[0.08] pt-3 pb-8 px-5 shadow-[0_-10px_60px_rgba(0,0,0,0.5)] relative z-[500] mt-auto flex flex-col"
+        className="absolute bottom-[90px] left-4 right-4 z-[500] bg-[#0f1729]/80 backdrop-blur-2xl rounded-3xl border border-white/[0.1] pt-3 pb-6 px-5 shadow-[0_15px_50px_rgba(0,0,0,0.6)] flex flex-col mx-auto max-w-md"
         initial={false}
-        animate={{ height: isSheetExpanded && selectedStation ? 'auto' : '105px' }}
+        animate={{ height: isSheetExpanded && selectedStation ? 'auto' : '100px' }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={0.2}
+        onDragEnd={(e, { offset, velocity }) => {
+          if (offset.y > 50 || velocity.y > 500) {
+            setIsSheetExpanded(false);
+          } else if (offset.y < -50 || velocity.y < -500) {
+            if (selectedStation) setIsSheetExpanded(true);
+          }
+        }}
       >
         {/* Handle */}
-        <div className="w-full flex justify-center py-2 cursor-pointer mb-1" onClick={() => setIsSheetExpanded(!isSheetExpanded)}>
-          <div className="w-10 h-1 bg-slate-700 rounded-full hover:bg-slate-500 transition-colors" />
+        <div className="w-full flex justify-center pb-2 cursor-pointer mb-2" onClick={() => setIsSheetExpanded(!isSheetExpanded)}>
+          <div className="w-12 h-1.5 bg-slate-600/50 rounded-full hover:bg-slate-500 transition-colors" />
         </div>
 
         {selectedStation ? (
@@ -795,7 +1200,7 @@ export function MapScreen() {
                           return (
                             <button
                               key={s.id}
-                              onClick={() => { setSelectedStation(s); map?.panTo({ lat: s.lat, lng: s.lng }); }}
+                              onClick={() => { setSelectedStation(s); fetchAiInsight(s); map?.panTo({ lat: s.lat, lng: s.lng }); }}
                               className="bg-white/[0.04] border border-white/[0.05] rounded-xl px-3 py-2 flex flex-col items-center shrink-0 hover:bg-white/[0.07] transition-colors active:scale-95"
                             >
                               <span className="text-[9px] font-bold text-slate-400 truncate max-w-[60px]">{s.name}</span>
@@ -807,22 +1212,42 @@ export function MapScreen() {
                     </div>
                   )}
 
-                  {/* EcoBot Tip */}
-                  <div className="bg-blue-500/[0.08] border border-blue-500/15 rounded-2xl p-3.5 flex gap-3 mb-4">
-                    <div className="w-8 h-8 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
-                      <Bot className="text-blue-400" size={16} />
+                  {/* EcoBot Live Local AI Insight */}
+                  <div className="bg-[#0b1120] border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.1)_inset] rounded-2xl p-4 flex flex-col gap-3 mb-4 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent opacity-50" />
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center relative">
+                          <Bot className="text-blue-400" size={14} />
+                          {aiInsight.loading && <div className="absolute inset-0 rounded-full border border-blue-400 border-t-transparent animate-spin" />}
+                        </div>
+                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                          Local AI Core
+                        </span>
+                      </div>
+                      
+                      {!aiInsight.loading && (
+                         <div className="flex items-center gap-1.5 bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">
+                           <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                           <span className="text-[8px] font-bold text-green-400 uppercase tracking-wider">Active</span>
+                         </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-[9px] font-bold text-blue-400 uppercase tracking-widest mb-0.5">EcoBot</p>
-                      <p className="text-xs leading-relaxed text-slate-300">
-                        {selectedStation.aqi > 150
-                          ? `Air in ${selectedStation.name} is unhealthy. Avoid prolonged outdoor activity and wear an N95 mask if going out.`
-                          : selectedStation.aqi > 100
-                          ? `${selectedStation.name} has moderate-to-poor air. Sensitive groups should limit outdoor exertion.`
-                          : selectedStation.aqi > 50
-                          ? `${selectedStation.name} has acceptable air quality. Light outdoor activity is fine.`
-                          : `${selectedStation.name} has excellent air quality! Perfect for outdoor activities. 🌿`}
-                      </p>
+                    
+                    <div className="ml-1 relative">
+                       {/* AI typing scanline effect */}
+                       <div className="absolute left-0 top-0 bottom-0 w-px bg-blue-500/30" />
+                       
+                       <p className="text-xs leading-relaxed text-blue-100/90 pl-3 font-mono">
+                         {aiInsight.loading ? (
+                           <span className="flex items-center gap-2">
+                             <Loader2 size={12} className="animate-spin text-blue-500" /> Analyzing atmospheric data models locally...
+                           </span>
+                         ) : (
+                           aiInsight.text
+                         )}
+                       </p>
                     </div>
                   </div>
 

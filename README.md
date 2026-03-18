@@ -50,6 +50,35 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+### 3. Use Your Own AQI API Key (for grounded qwen2.5 responses)
+The backend can fetch AQI from your API key provider and pass that grounded data to `qwen2.5`.
+
+Set these environment variables before starting backend:
+
+```bash
+# Provider options: open-meteo (default, no key) or waqi (token required)
+set AQI_PROVIDER=waqi
+set AQI_API_KEY=YOUR_WAQI_TOKEN
+
+# Optional: force fast local model
+set OLLAMA_MODEL=qwen2.5:0.5b
+```
+
+Then run:
+
+```bash
+cd backend_ai
+uvicorn main:app --reload --port 8000
+```
+
+Check config at:
+
+```bash
+http://localhost:8000/api/status
+```
+
+You should see `"aqi_provider": "waqi"` and `"aqi_key_configured": true`.
+
 ## 📝 Next Steps (Phase 4)
 - Predictive Air Quality forecasting.
 - Gamification (Eco-streaks and daily challenges).

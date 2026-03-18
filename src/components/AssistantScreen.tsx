@@ -31,8 +31,9 @@ export function AssistantScreen() {
   const [isListening, setIsListening] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [autoSpeak, setAutoSpeak] = useState(false); // Disabling auto-speak by default to increase perceived speed
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [envContext, setEnvContext] = useState({ aqi: 0, location: 'Detecting Location...', resolved: false, lat: null as number | null, lon: null as number | null });
   const [ollamaStatus, setOllamaStatus] = useState<string>('checking...');
   const [showStatus, setShowStatus] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
@@ -40,6 +41,39 @@ export function AssistantScreen() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const resolveEnvContextNow = useCallback(async () => {
+    if (!("geolocation" in navigator)) {
+      return { aqi: 50, location: 'Unknown', resolved: true, lat: null as number | null, lon: null as number | null };
+    }
+
+    return await new Promise<{ aqi: number; location: string; resolved: boolean; lat: number | null; lon: number | null }>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const { latitude: lat, longitude: lon } = pos.coords;
+          try {
+            const aqiResp = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi`);
+            const aqiData = await aqiResp.json();
+            const aqi = aqiData?.current?.us_aqi ? Math.round(aqiData.current.us_aqi) : 50;
+
+            const geoResp = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`);
+            const geoData = await geoResp.json();
+            const location = geoData?.address?.city || geoData?.address?.town || geoData?.address?.state || 'Your Area';
+
+            resolve({ aqi, location, resolved: true, lat, lon });
+          } catch {
+            resolve({ aqi: 50, location: 'Unknown Location', resolved: true, lat, lon });
+          }
+        },
+        () => resolve({ aqi: 50, location: 'Unknown Location', resolved: true, lat: null, lon: null }),
+        {
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 0
+        }
+      );
+    });
+  }, []);
 
   // ─── Scroll to bottom on new messages ──────────────
   useEffect(() => {
@@ -68,6 +102,16 @@ export function AssistantScreen() {
     const interval = setInterval(checkStatus, 30000); // Re-check every 30s
     return () => clearInterval(interval);
   }, []);
+
+  // ─── Fetch Real User Context (Location & AQI) ──────
+  useEffect(() => {
+    const fetchEnvData = async () => {
+      const context = await resolveEnvContextNow();
+      setEnvContext(context);
+    };
+    
+    fetchEnvData();
+  }, [resolveEnvContextNow]);
 
   // ─── Text-to-Speech via edge-tts backend ───────────
   const speakText = useCallback(async (text: string) => {
@@ -134,43 +178,92 @@ export function AssistantScreen() {
     setInputText('');
     setIsTyping(true);
 
+    // Stop speaking if a new message is sent
+    if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+        setIsSpeaking(false);
+    }
+
     try {
       if (!backendOnline) throw new Error('Backend offline');
 
+      let requestContext = envContext;
+      if (!envContext.resolved || envContext.lat === null || envContext.lon === null) {
+        requestContext = await resolveEnvContextNow();
+        setEnvContext(requestContext);
+      }
+
+      // Wait for AI generating response stream (fake typing delay removed)
       const resp = await fetch(`${BACKEND_URL}/api/ask-ecobot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_voice_text: text.trim(),
-          current_aqi: 72, // TODO: Pass real AQI from app state/context
-          location: 'Visakhapatnam'  // TODO: Pass real location
+          current_aqi: requestContext.aqi,
+          location: requestContext.location,
+          latitude: requestContext.lat,
+          longitude: requestContext.lon
         })
       });
 
       if (!resp.ok) throw new Error('Request failed');
 
-      const data = await resp.json();
-
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.reply,
-        timestamp: new Date(),
-        source: data.source,
-        model: data.model
-      };
+      // Setup a blank placeholder message that we will stream text into
+      const aiMsgId = (Date.now() + 1).toString();
       setIsTyping(false);
-      setMessages(prev => [...prev, aiMsg]);
+      setMessages(prev => [...prev, {
+        id: aiMsgId,
+        role: 'assistant',
+        content: '', // Start empty
+        timestamp: new Date(),
+        source: 'ollama',
+        model: 'Thinking...'
+      }]);
 
-      // Auto-speak the response
-      speakText(data.reply);
+      const reader = resp.body?.getReader();
+      const decoder = new TextDecoder('utf-8');
+      if (!reader) throw new Error("No reader");
+
+      let fullReply = '';
+      let isDone = false;
+
+      while (!isDone) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6);
+            if (dataStr === '[DONE]') {
+              isDone = true;
+              break;
+            }
+            try {
+              const parsed = JSON.parse(dataStr);
+              fullReply += parsed.text;
+              
+              setMessages(prev => prev.map(m => 
+                m.id === aiMsgId 
+                  ? { ...m, content: fullReply, source: parsed.source, model: parsed.model } 
+                  : m
+              ));
+            } catch (e) {}
+          }
+        }
+      }
+
+      if (autoSpeak) speakText(fullReply);
 
     } catch {
-      // Offline fallback (basic responses without backend)
+      // Offline fallback
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: "I'm having trouble connecting to my backend server. Please make sure the FastAPI server is running:\n\n`cd backend_ai && uvicorn main:app --reload`\n\nOnce it's up, I'll be fully functional!",
+        content: "I'm having trouble connecting to my local AI Core. Please make sure the Python server is running.\n\nType this in the terminal:\n`cd backend_ai && python -m uvicorn main:app --reload --port 8000`",
         timestamp: new Date(),
         source: 'fallback'
       };
@@ -337,6 +430,12 @@ export function AssistantScreen() {
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">AI Engine</span>
                   <span className="text-[10px] font-bold text-slate-300">{ollamaStatus}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Local Context</span>
+                  <span className={`text-[10px] font-bold ${envContext.resolved ? 'text-blue-400' : 'text-slate-500 animate-pulse'}`}>
+                    {envContext.location} (AQI: {envContext.aqi || '--'})
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Voice</span>
