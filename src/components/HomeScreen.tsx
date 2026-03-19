@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Menu, MapPin, Bell, Wind, Droplets, Sun, Cloud, CloudRain, Shield, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SkeletonHomeScreen } from './ui';
 
 interface AqiData {
   aqi: number;
@@ -46,6 +47,7 @@ export function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const coordsRef = useRef<{ lat: number; lon: number } | null>(null);
 
   async function fetchWeather(lat: number, lon: number) {
@@ -91,9 +93,11 @@ export function HomeScreen() {
           status: info.status, color: info.color, hex: info.hex
         });
         setLastUpdated(new Date());
+        setIsInitialLoad(false);
       }
     } catch (error) {
       console.error("Failed to fetch AQI data:", error);
+      setIsInitialLoad(false);
     }
   }
 
@@ -159,6 +163,11 @@ export function HomeScreen() {
   const pm25Percent = Math.min(100, (aqiData.pm25 / 75) * 100);
   const pm10Percent = Math.min(100, (aqiData.pm10 / 150) * 100);
   const WeatherIcon = weather.condition === 'Rainy' ? CloudRain : weather.condition === 'Cloudy' ? Cloud : Sun;
+
+  // Show skeleton on initial load
+  if (isInitialLoad) {
+    return <SkeletonHomeScreen />;
+  }
 
   return (
     <div className="min-h-full bg-[#0b1120] flex flex-col items-center px-5 pt-6 pb-32 relative overflow-hidden font-display">

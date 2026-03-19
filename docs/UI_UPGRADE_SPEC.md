@@ -1455,12 +1455,12 @@ Offline Support:
 ### Phase 1: Core Improvements (Week 1-2)
 - [x] Fix building label visibility (zoom-based)
 - [x] Improve location matching for campus
-- [ ] Refactor monolithic component into modules
-- [ ] Add error boundaries
-- [ ] Implement proper TypeScript types
+- [x] Refactor monolithic component into modules
+- [x] Add error boundaries
+- [x] Implement proper TypeScript types
 
 ### Phase 2: UX Enhancements (Week 3-4)
-- [ ] Search autocomplete
+- [x] Search autocomplete
 - [ ] Improved bottom sheet animations
 - [ ] Loading skeletons
 - [ ] Empty states

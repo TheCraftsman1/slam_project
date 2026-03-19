@@ -8,66 +8,66 @@ Work through each phase systematically. Check off items as completed.
 ## PHASE 1: Core Improvements (Priority: HIGH)
 
 ### 1.1 Code Architecture
-- [ ] Split MapScreen.tsx into smaller components:
-  - [ ] `components/map/AqiMarker.tsx`
-  - [ ] `components/map/BuildingLabel.tsx`
-  - [ ] `components/map/MapControls.tsx`
-  - [ ] `components/panels/CityPanel.tsx`
-  - [ ] `components/panels/CollegePanel.tsx`
-  - [ ] `components/sheets/AqiBottomSheet.tsx`
-  - [ ] `components/search/SearchBar.tsx`
-  - [ ] `components/search/FilterChips.tsx`
-- [ ] Create shared hooks:
-  - [ ] `hooks/useAqiData.ts`
-  - [ ] `hooks/useGeolocation.ts`
-  - [ ] `hooks/useMapControls.ts`
-- [ ] Add TypeScript interfaces file:
-  - [ ] `types/aqi.ts`
-  - [ ] `types/buildings.ts`
-  - [ ] `types/map.ts`
+- [x] Split MapScreen.tsx into smaller components:
+  - [x] `components/map/AqiMarker.tsx`
+  - [x] `components/map/BuildingLabel.tsx`
+  - [x] `components/map/MapControls.tsx`
+  - [x] `components/panels/CityPanel.tsx`
+  - [x] `components/panels/CollegePanel.tsx`
+  - [x] `components/sheets/AqiBottomSheet.tsx`
+  - [x] `components/search/SearchBar.tsx`
+  - [x] `components/search/FilterChips.tsx`
+- [x] Create shared hooks:
+  - [x] `hooks/useAqiData.ts`
+  - [x] `hooks/useGeolocation.ts`
+  - [x] `hooks/useMapControls.ts`
+- [x] Add TypeScript interfaces file:
+  - [x] `types/aqi.ts`
+  - [x] `types/buildings.ts`
+  - [x] `types/map.ts`
 
 ### 1.2 Error Handling
-- [ ] Add React Error Boundaries
-- [ ] Implement retry logic for API failures
-- [ ] Add offline detection and UI feedback
-- [ ] Create toast/notification system for errors
+- [x] Add React Error Boundaries
+- [x] Implement retry logic for API failures
+- [x] Add offline detection and UI feedback
+- [x] Create toast/notification system for errors
 
 ### 1.3 Environment & Config
-- [ ] Move API keys to environment variables
-- [ ] Create config file for app constants
-- [ ] Add development/production environment handling
+- [x] Move API keys to environment variables
+- [x] Create config file for app constants
+- [x] Add development/production environment handling
 
 ---
 
 ## PHASE 2: UX Enhancements (Priority: HIGH)
 
 ### 2.1 Search Improvements
-- [ ] Add search autocomplete dropdown
-- [ ] Show recent searches
-- [ ] Add search suggestions based on location
-- [ ] Implement fuzzy search for building names
-- [ ] Add voice search functionality (Web Speech API)
+- [x] Add search autocomplete dropdown
+- [x] Show recent searches
+- [x] Add search suggestions based on location
+- [x] Implement fuzzy search for building names
+- [x] Add voice search functionality (Web Speech API)
 
 ### 2.2 Loading States
-- [ ] Add skeleton loaders for:
-  - [ ] AQI markers while loading
-  - [ ] Bottom sheet content
-  - [ ] City/College panels
-  - [ ] AI insight section
-- [ ] Improve loading animations
-- [ ] Add progress indicators for multi-step operations
+- [x] Add skeleton loaders for:
+  - [x] AQI markers while loading
+  - [x] Bottom sheet content
+  - [x] City/College panels
+  - [x] AI insight section
+- [x] Improve loading animations
+- [x] Add progress indicators for multi-step operations
 
 ### 2.3 Empty & Error States
-- [ ] Design empty state for no stations
-- [ ] Add error state with retry button
-- [ ] Create "no results" state for search
-- [ ] Add connection lost indicator
+- [x] Design empty state for no stations (MapScreen)
+- [x] Add error state with retry button (MapScreen / Bottom Sheet)
+- [x] Create "no results" state for search (SearchBar)
+- [x] Add connection lost indicator (global)
 
 ### 2.4 Bottom Sheet Improvements
-- [ ] Smoother drag animations
-- [ ] Add haptic feedback on state changes
-- [ ] Improve pollutant grid layout
-- [ ] Add trend indicators (arrow up/down)
+- [x] Smoother drag animations
+- [x] Add haptic feedback on state changes
+- [x] Improve pollutant grid layout
+- [x] Add trend indicators (arrow up/down)
 
 ---
 

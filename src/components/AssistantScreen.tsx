@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Send, Bot, User, Sparkles, Volume2, VolumeX, Wifi, WifiOff, Settings, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Mic, MicOff, Send, Bot, User, Sparkles, Volume2, VolumeX, Wifi, WifiOff, Settings, Loader2, Square } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { BACKEND_URL } from '../utils/config';
 
 // ─── Types ───────────────────────────────────────────
 interface Message {
@@ -12,8 +13,25 @@ interface Message {
   model?: string;
 }
 
-// ─── Config ──────────────────────────────────────────
-const BACKEND_URL = 'http://localhost:8000';
+interface EnvContext {
+  aqi: number;
+  location: string;
+  resolved: boolean;
+  lat: number | null;
+  lon: number | null;
+}
+
+const OUTPUT_DENIAL_MARKERS = [
+  "i don't have",
+  "i dont have",
+  "i'm not aware",
+  "im not aware",
+  'no data',
+  'cannot access',
+  "can't access",
+];
+
+const MAX_RESPONSE_SENTENCES = 5;
 
 // ─── Web Speech API type helpers ─────────────────────
 const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -30,10 +48,13 @@ export function AssistantScreen() {
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false); // Disabling auto-speak by default to increase perceived speed
+  const [strictOutputMode, setStrictOutputMode] = useState(true);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const [envContext, setEnvContext] = useState({ aqi: 0, location: 'Detecting Location...', resolved: false, lat: null as number | null, lon: null as number | null });
+  const [activeBackendUrl, setActiveBackendUrl] = useState<string>(BACKEND_URL);
+  const [envContext, setEnvContext] = useState<EnvContext>({ aqi: 0, location: 'Detecting Location...', resolved: false, lat: null, lon: null });
   const [ollamaStatus, setOllamaStatus] = useState<string>('checking...');
   const [showStatus, setShowStatus] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
@@ -41,8 +62,18 @@ export function AssistantScreen() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
-  const resolveEnvContextNow = useCallback(async () => {
+  const backendCandidates = useMemo(() => {
+    return Array.from(new Set([
+      BACKEND_URL,
+      'http://127.0.0.2:8000',
+      'http://127.0.0.1:8000',
+      'http://localhost:8000',
+    ]));
+  }, []);
+
+  const resolveEnvContextNow = useCallback(async (): Promise<EnvContext> => {
     if (!("geolocation" in navigator)) {
       return { aqi: 50, location: 'Unknown', resolved: true, lat: null as number | null, lon: null as number | null };
     }
@@ -75,6 +106,128 @@ export function AssistantScreen() {
     });
   }, []);
 
+  const extractTargetLocationFromQuery = (query: string): string | null => {
+    const lowered = query.toLowerCase().trim();
+    const pattern = /\b(?:in|at|for|of|near)\s+([a-z]+(?:[\s-][a-z]+){0,2})\b/i;
+    const match = lowered.match(pattern);
+    if (!match?.[1]) return null;
+    const candidate = match[1].trim();
+    if (!candidate || candidate.length < 2) return null;
+    return candidate
+      .split(/[\s-]+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  const trimToSentenceLimit = (text: string, maxSentences: number): string => {
+    const sentenceMatches = text.match(/[^.!?]+[.!?]+/g);
+    if (!sentenceMatches || sentenceMatches.length <= maxSentences) {
+      return text;
+    }
+    return sentenceMatches.slice(0, maxSentences).join(' ').trim();
+  };
+
+  const buildDeterministicReply = (query: string, context: EnvContext): string => {
+    const targetLocation = extractTargetLocationFromQuery(query) || context.location || 'your area';
+    const aqiValue = Number.isFinite(context.aqi) ? context.aqi : 50;
+
+    if (aqiValue > 200) {
+      return `AQI in ${targetLocation} is ${aqiValue} (Very Unhealthy). Avoid outdoor activity, stay indoors, and use an N95 mask if you must step outside.`;
+    }
+    if (aqiValue > 150) {
+      return `AQI in ${targetLocation} is ${aqiValue} (Unhealthy). Reduce outdoor exertion and wear a mask for longer outdoor exposure.`;
+    }
+    if (aqiValue > 100) {
+      return `AQI in ${targetLocation} is ${aqiValue} (Unhealthy for Sensitive Groups). Sensitive people should limit outdoor time and heavy exercise.`;
+    }
+    if (aqiValue > 50) {
+      return `AQI in ${targetLocation} is ${aqiValue} (Moderate). Outdoor activity is generally fine, but sensitive groups should stay cautious.`;
+    }
+    return `AQI in ${targetLocation} is ${aqiValue} (Good). Air quality is safe for normal outdoor activities.`;
+  };
+
+  const normalizeAssistantReply = (rawReply: string, query: string, context: EnvContext): string => {
+    const collapsed = rawReply
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([,.!?;:])/g, '$1')
+      .trim();
+
+    if (!collapsed) {
+      return buildDeterministicReply(query, context);
+    }
+
+    const lowered = collapsed.toLowerCase();
+    const shouldForceDeterministic = strictOutputMode && OUTPUT_DENIAL_MARKERS.some(marker => lowered.includes(marker));
+    if (shouldForceDeterministic) {
+      return buildDeterministicReply(query, context);
+    }
+
+    return trimToSentenceLimit(collapsed, MAX_RESPONSE_SENTENCES);
+  };
+
+  const pushSystemAssistantMessage = (content: string, source: 'fallback' | 'ollama' = 'fallback') => {
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content,
+      timestamp: new Date(),
+      source,
+      model: source === 'fallback' ? 'client-guard' : undefined,
+    }]);
+  };
+
+  const handleSlashCommand = async (rawInput: string): Promise<boolean> => {
+    const input = rawInput.trim();
+    if (!input.startsWith('/')) return false;
+
+    const [command, ...args] = input.split(/\s+/);
+    const commandName = command.toLowerCase();
+
+    if (commandName === '/help') {
+      pushSystemAssistantMessage(
+        'Available commands:\n• /help\n• /status\n• /locate\n• /clear\n• /aqi <place>\n\nExample: /aqi paris',
+        'fallback'
+      );
+      return true;
+    }
+
+    if (commandName === '/status') {
+      const statusText = `Backend: ${backendOnline ? 'Online' : 'Offline'}\nEndpoint: ${activeBackendUrl}\nAI Engine: ${ollamaStatus}\nContext: ${envContext.location} (AQI ${envContext.aqi || '--'})\nStrict Output Mode: ${strictOutputMode ? 'ON' : 'OFF'}`;
+      pushSystemAssistantMessage(statusText, 'fallback');
+      return true;
+    }
+
+    if (commandName === '/locate') {
+      const updatedContext = await resolveEnvContextNow();
+      setEnvContext(updatedContext);
+      pushSystemAssistantMessage(`Location refreshed: ${updatedContext.location} (AQI ${updatedContext.aqi || '--'})`, 'fallback');
+      return true;
+    }
+
+    if (commandName === '/clear') {
+      setMessages([{
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: "Chat reset complete. I'm ready for the next AQI query.",
+        timestamp: new Date(),
+      }]);
+      return true;
+    }
+
+    if (commandName === '/aqi') {
+      const place = args.join(' ').trim();
+      if (!place) {
+        pushSystemAssistantMessage('Usage: /aqi <place>\nExample: /aqi new york', 'fallback');
+        return true;
+      }
+      await sendMessage(`What is the current AQI in ${place}? Give 1-2 lines with health advice.`);
+      return true;
+    }
+
+    pushSystemAssistantMessage(`Unknown command: ${commandName}. Type /help to see available commands.`, 'fallback');
+    return true;
+  };
+
   // ─── Scroll to bottom on new messages ──────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -83,25 +236,28 @@ export function AssistantScreen() {
   // ─── Check backend status on mount ─────────────────
   useEffect(() => {
     const checkStatus = async () => {
-      try {
-        const resp = await fetch(`${BACKEND_URL}/api/status`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setBackendOnline(true);
-          setOllamaStatus(data.ollama);
-        } else {
-          setBackendOnline(false);
-          setOllamaStatus('backend offline');
+      for (const candidate of backendCandidates) {
+        try {
+          const resp = await fetch(`${candidate}/api/status`);
+          if (resp.ok) {
+            const data = await resp.json();
+            setBackendOnline(true);
+            setActiveBackendUrl(candidate);
+            setOllamaStatus(data.ollama);
+            return;
+          }
+        } catch {
+          // Try next endpoint candidate
         }
-      } catch {
-        setBackendOnline(false);
-        setOllamaStatus('backend offline');
       }
+
+      setBackendOnline(false);
+      setOllamaStatus('backend offline');
     };
     checkStatus();
     const interval = setInterval(checkStatus, 30000); // Re-check every 30s
     return () => clearInterval(interval);
-  }, []);
+  }, [backendCandidates]);
 
   // ─── Fetch Real User Context (Location & AQI) ──────
   useEffect(() => {
@@ -125,7 +281,7 @@ export function AssistantScreen() {
 
     try {
       setIsSpeaking(true);
-      const resp = await fetch(`${BACKEND_URL}/api/tts`, {
+      const resp = await fetch(`${activeBackendUrl}/api/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: text.replace(/[🌿🌱💚✨🌳☀️]/g, '') }) // Strip emojis for cleaner speech
@@ -153,7 +309,7 @@ export function AssistantScreen() {
     } catch {
       setIsSpeaking(false);
     }
-  }, [autoSpeak, backendOnline]);
+  }, [autoSpeak, backendOnline, activeBackendUrl]);
 
   // ─── Stop speaking ────────────────────────────────
   const stopSpeaking = () => {
@@ -164,29 +320,53 @@ export function AssistantScreen() {
     setIsSpeaking(false);
   };
 
+  const stopStreaming = () => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+    }
+    setIsStreaming(false);
+    setIsTyping(false);
+  };
+
   // ─── Send message to backend ──────────────────────
   const sendMessage = async (text: string) => {
-    if (!text.trim()) return;
+    const normalizedInput = text.trim();
+    if (!normalizedInput) return;
+
+    const handledAsCommand = await handleSlashCommand(normalizedInput);
+    if (handledAsCommand) {
+      setInputText('');
+      return;
+    }
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: text.trim(),
+      content: normalizedInput,
       timestamp: new Date()
     };
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsTyping(true);
+    setIsStreaming(false);
 
-    // Stop speaking if a new message is sent
     if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-        setIsSpeaking(false);
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsSpeaking(false);
     }
+
+    let aiMsgId: string | null = null;
 
     try {
       if (!backendOnline) throw new Error('Backend offline');
+
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort();
+      }
+      const streamController = new AbortController();
+      streamAbortRef.current = streamController;
 
       let requestContext = envContext;
       if (!envContext.resolved || envContext.lat === null || envContext.lon === null) {
@@ -194,12 +374,12 @@ export function AssistantScreen() {
         setEnvContext(requestContext);
       }
 
-      // Wait for AI generating response stream (fake typing delay removed)
-      const resp = await fetch(`${BACKEND_URL}/api/ask-ecobot`, {
+      const resp = await fetch(`${activeBackendUrl}/api/ask-ecobot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: streamController.signal,
         body: JSON.stringify({
-          user_voice_text: text.trim(),
+          user_voice_text: normalizedInput,
           current_aqi: requestContext.aqi,
           location: requestContext.location,
           latitude: requestContext.lat,
@@ -209,66 +389,113 @@ export function AssistantScreen() {
 
       if (!resp.ok) throw new Error('Request failed');
 
-      // Setup a blank placeholder message that we will stream text into
-      const aiMsgId = (Date.now() + 1).toString();
+      aiMsgId = (Date.now() + 1).toString();
       setIsTyping(false);
+      setIsStreaming(true);
       setMessages(prev => [...prev, {
         id: aiMsgId,
         role: 'assistant',
-        content: '', // Start empty
+        content: '',
         timestamp: new Date(),
         source: 'ollama',
         model: 'Thinking...'
       }]);
 
       const reader = resp.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-      if (!reader) throw new Error("No reader");
+      if (!reader) throw new Error('No reader');
 
+      const decoder = new TextDecoder('utf-8');
       let fullReply = '';
+      let buffer = '';
       let isDone = false;
+      let responseSource: 'ollama' | 'fallback' = 'ollama';
+      let responseModel = 'Thinking...';
+
+      const applyDataPayload = (dataStr: string) => {
+        if (!dataStr || dataStr === '[DONE]') {
+          if (dataStr === '[DONE]') {
+            isDone = true;
+          }
+          return;
+        }
+        try {
+          const parsed = JSON.parse(dataStr);
+          const chunkText = typeof parsed.text === 'string' ? parsed.text : '';
+          if (!chunkText) return;
+
+          fullReply += chunkText;
+          responseSource = parsed.source === 'fallback' ? 'fallback' : 'ollama';
+          responseModel = typeof parsed.model === 'string' ? parsed.model : responseModel;
+
+          setMessages(prev => prev.map(message =>
+            message.id === aiMsgId
+              ? { ...message, content: fullReply, source: responseSource, model: responseModel }
+              : message
+          ));
+        } catch {
+          // Ignore malformed SSE payloads
+        }
+      };
 
       while (!isDone) {
         const { value, done } = await reader.read();
         if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6);
-            if (dataStr === '[DONE]') {
-              isDone = true;
-              break;
-            }
-            try {
-              const parsed = JSON.parse(dataStr);
-              fullReply += parsed.text;
-              
-              setMessages(prev => prev.map(m => 
-                m.id === aiMsgId 
-                  ? { ...m, content: fullReply, source: parsed.source, model: parsed.model } 
-                  : m
-              ));
-            } catch (e) {}
-          }
+          const trimmedLine = line.trim();
+          if (!trimmedLine.startsWith('data: ')) continue;
+          applyDataPayload(trimmedLine.slice(6).trim());
+          if (isDone) break;
         }
       }
 
-      if (autoSpeak) speakText(fullReply);
+      const trailing = buffer.trim();
+      if (!isDone && trailing.startsWith('data: ')) {
+        applyDataPayload(trailing.slice(6).trim());
+      }
 
-    } catch {
-      // Offline fallback
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "I'm having trouble connecting to my local AI Core. Please make sure the Python server is running.\n\nType this in the terminal:\n`cd backend_ai && python -m uvicorn main:app --reload --port 8000`",
-        timestamp: new Date(),
-        source: 'fallback'
-      };
+      const normalizedReply = normalizeAssistantReply(fullReply, normalizedInput, requestContext);
+      setMessages(prev => prev.map(message =>
+        message.id === aiMsgId
+          ? { ...message, content: normalizedReply, source: responseSource, model: responseModel }
+          : message
+      ));
+
+      if (autoSpeak) {
+        speakText(normalizedReply);
+      }
+    } catch (error) {
+      const isAbort = error instanceof DOMException && error.name === 'AbortError';
+
+      if (isAbort) {
+        if (aiMsgId) {
+          setMessages(prev => prev.map(message =>
+            message.id === aiMsgId
+              ? {
+                  ...message,
+                  content: message.content?.trim() ? message.content : 'Response generation stopped.',
+                  source: 'fallback',
+                  model: 'client-guard'
+                }
+              : message
+          ));
+        } else {
+          pushSystemAssistantMessage('Response generation stopped.', 'fallback');
+        }
+        return;
+      }
+
+      const startCommand = 'python -m uvicorn main:app --app-dir backend_ai --port 8000';
+      const offlineMessage = `I'm having trouble connecting to my AI backend.\n\nStart backend with:\n${startCommand}\n\nCurrent backend URL: ${activeBackendUrl}`;
+      pushSystemAssistantMessage(offlineMessage, 'fallback');
+    } finally {
+      streamAbortRef.current = null;
       setIsTyping(false);
-      setMessages(prev => [...prev, aiMsg]);
+      setIsStreaming(false);
     }
   };
 
@@ -432,6 +659,10 @@ export function AssistantScreen() {
                   <span className="text-[10px] font-bold text-slate-300">{ollamaStatus}</span>
                 </div>
                 <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Endpoint</span>
+                  <span className="text-[10px] font-bold text-slate-300">{activeBackendUrl}</span>
+                </div>
+                <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Local Context</span>
                   <span className={`text-[10px] font-bold ${envContext.resolved ? 'text-blue-400' : 'text-slate-500 animate-pulse'}`}>
                     {envContext.location} (AQI: {envContext.aqi || '--'})
@@ -444,6 +675,15 @@ export function AssistantScreen() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Output Guard</span>
+                  <button
+                    onClick={() => setStrictOutputMode(!strictOutputMode)}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-full transition-colors ${strictOutputMode ? 'bg-emerald-500/15 text-emerald-400' : 'bg-white/[0.06] text-slate-400'}`}
+                  >
+                    {strictOutputMode ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Speech Input</span>
                   <span className="text-[10px] font-bold text-slate-300">
                     {SpeechRecognitionClass ? 'Web Speech API ✓' : 'Not Supported'}
@@ -452,10 +692,15 @@ export function AssistantScreen() {
                 {!backendOnline && (
                   <div className="pt-2 border-t border-white/[0.05]">
                     <p className="text-[10px] text-yellow-400/80 leading-relaxed">
-                      Start backend: <span className="font-mono bg-white/[0.05] px-1.5 py-0.5 rounded">cd backend_ai && uvicorn main:app --reload</span>
+                      Start backend: <span className="font-mono bg-white/[0.05] px-1.5 py-0.5 rounded">python -m uvicorn main:app --app-dir backend_ai --port 8000</span>
                     </p>
                   </div>
                 )}
+                <div className="pt-2 border-t border-white/[0.05]">
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Commands: <span className="font-mono">/help</span> <span className="font-mono">/status</span> <span className="font-mono">/locate</span> <span className="font-mono">/clear</span> <span className="font-mono">/aqi &lt;place&gt;</span>
+                  </p>
+                </div>
               </div>
             </motion.div>
           )}
@@ -664,15 +909,26 @@ export function AssistantScreen() {
               disabled={isListening}
             />
           </div>
-          <button
-            type="submit"
-            disabled={!inputText.trim() || isListening}
-            className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 active:scale-95 transition-all ${
-              inputText.trim() ? 'bg-blue-500 text-white shadow-[0_4px_15px_rgba(59,130,246,0.3)]' : 'bg-white/[0.05] text-slate-600'
-            }`}
-          >
-            <Send size={16} />
-          </button>
+          {isStreaming ? (
+            <button
+              type="button"
+              onClick={stopStreaming}
+              className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 active:scale-95 transition-all bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25"
+              title="Stop response"
+            >
+              <Square size={16} />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isListening}
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 active:scale-95 transition-all ${
+                inputText.trim() ? 'bg-blue-500 text-white shadow-[0_4px_15px_rgba(59,130,246,0.3)]' : 'bg-white/[0.05] text-slate-600'
+              }`}
+            >
+              <Send size={16} />
+            </button>
+          )}
         </form>
       </div>
     </div>

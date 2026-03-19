@@ -28,11 +28,13 @@ app.add_middleware(
 )
 
 # ─── Config ───────────────────────────────────────────
-OLLAMA_MODEL = "llama3.1:latest"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:latest")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AriaNeural")  # High-quality Microsoft Neural voice
-AQI_PROVIDER = os.getenv("AQI_PROVIDER", "open-meteo").strip().lower()
+AQI_PROVIDER = os.getenv("AQI_PROVIDER", "auto").strip().lower()
 AQI_API_KEY = os.getenv("AQI_API_KEY", "").strip()
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", os.getenv("VITE_GOOGLE_MAPS_API_KEY", "")).strip()
+GOOGLE_AIR_QUALITY_API_KEY = os.getenv("GOOGLE_AIR_QUALITY_API_KEY", GOOGLE_MAPS_API_KEY).strip()
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "768"))
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "80"))
 OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
@@ -157,11 +159,200 @@ def get_iare_context(query: str, location: str, latitude: Optional[float], longi
     )
 
 
+# ─── City Detection & Geocoding ───────────────────────
+GEOCODE_CACHE: dict[str, tuple[float, dict]] = {}
+GEOCODE_CACHE_TTL_SECONDS = int(os.getenv("GEOCODE_CACHE_TTL_SECONDS", "43200"))
+
+# Region/state fallbacks where public geocoding can be inconsistent.
+# Coordinates point to major reference city/centroid in the region for AQI lookup.
+COMMON_REGIONS = {
+    "tamil nadu": {"name": "Tamil Nadu", "lat": 13.0827, "lon": 80.2707},
+    "andhra pradesh": {"name": "Andhra Pradesh", "lat": 16.5062, "lon": 80.6480},
+    "telangana": {"name": "Telangana", "lat": 17.3850, "lon": 78.4867},
+    "karnataka": {"name": "Karnataka", "lat": 12.9716, "lon": 77.5946},
+    "kerala": {"name": "Kerala", "lat": 8.5241, "lon": 76.9366},
+    "maharashtra": {"name": "Maharashtra", "lat": 19.0760, "lon": 72.8777},
+    "gujarat": {"name": "Gujarat", "lat": 23.0225, "lon": 72.5714},
+    "rajasthan": {"name": "Rajasthan", "lat": 26.9124, "lon": 75.7873},
+    "uttar pradesh": {"name": "Uttar Pradesh", "lat": 26.8467, "lon": 80.9462},
+    "west bengal": {"name": "West Bengal", "lat": 22.5726, "lon": 88.3639},
+    "delhi ncr": {"name": "Delhi NCR", "lat": 28.6139, "lon": 77.2090},
+}
+
+def _extract_location_candidates(query: str) -> list[str]:
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    q_lower = q.lower()
+    candidates: list[str] = []
+
+    patterns = [
+        r"\b(?:aqi|air quality|pollution)\s+(?:in|at|for|of|near)\s+([a-z][a-z\s\-]{1,60})",
+        r"\b(?:in|at|for|of|near|around)\s+([a-z][a-z\s\-]{1,60})",
+    ]
+
+    stop_words = {
+        "today", "now", "please", "current", "currently", "right now", "weather",
+        "air", "quality", "aqi", "pollution", "the", "my", "your", "me",
+    }
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, q_lower):
+            phrase = (match.group(1) or "").strip(" ?!.,")
+            if not phrase:
+                continue
+            words = []
+            for token in phrase.split():
+                if token in stop_words:
+                    break
+                words.append(token)
+            normalized = " ".join(words[:4]).strip()
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+    if not candidates:
+        stripped = re.sub(r"[^a-zA-Z\s\-]", " ", q).strip().lower()
+        words = [w for w in stripped.split() if w not in stop_words]
+        if 1 <= len(words) <= 4:
+            fallback_candidate = " ".join(words)
+            if fallback_candidate:
+                candidates.append(fallback_candidate)
+
+    return candidates
+
+
+async def _geocode_with_google_maps(place_query: str) -> Optional[dict]:
+    if not GOOGLE_MAPS_API_KEY:
+        return None
+
+    try:
+        import httpx
+        import urllib.parse
+
+        encoded_query = urllib.parse.quote(place_query)
+        url = f"https://maps.googleapis.com/maps/api/geocode/json?address={encoded_query}&key={GOOGLE_MAPS_API_KEY}"
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(url)
+            if res.status_code != 200:
+                return None
+            payload = res.json()
+
+        if payload.get("status") != "OK":
+            return None
+
+        result = (payload.get("results") or [None])[0]
+        if not result:
+            return None
+
+        geometry = (result.get("geometry") or {}).get("location") or {}
+        lat = geometry.get("lat")
+        lon = geometry.get("lng")
+        if lat is None or lon is None:
+            return None
+
+        components = result.get("address_components") or []
+        locality = next((c.get("long_name") for c in components if "locality" in (c.get("types") or [])), None)
+        admin1 = next((c.get("long_name") for c in components if "administrative_area_level_1" in (c.get("types") or [])), None)
+        country = next((c.get("long_name") for c in components if "country" in (c.get("types") or [])), None)
+
+        display_name = locality or admin1 or result.get("formatted_address") or place_query
+
+        return {
+            "name": display_name,
+            "lat": float(lat),
+            "lon": float(lon),
+            "country": country,
+        }
+    except Exception:
+        return None
+
+
+async def _geocode_with_open_meteo(place_query: str) -> Optional[dict]:
+    try:
+        import httpx
+        import urllib.parse
+
+        encoded_city = urllib.parse.quote(place_query)
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_city}&count=1&language=en&format=json"
+
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            res = await client.get(url)
+            if res.status_code != 200:
+                return None
+            results = (res.json().get("results") or [])
+            if not results:
+                return None
+
+            top = results[0]
+            return {
+                "name": top.get("name") or place_query.title(),
+                "lat": float(top.get("latitude")),
+                "lon": float(top.get("longitude")),
+                "country": top.get("country"),
+            }
+    except Exception:
+        return None
+
+
+async def extract_and_geocode_city(query: str) -> Optional[dict]:
+    """
+    Detect if user is asking about a specific city and return its coordinates.
+    Returns {name, lat, lon} or None if no city detected.
+    """
+    candidates = _extract_location_candidates(query)
+    if not candidates:
+        return None
+
+    now = time.time()
+    for candidate in candidates:
+        candidate_key = candidate.lower().strip()
+        if not candidate_key:
+            continue
+
+        cached = GEOCODE_CACHE.get(candidate_key)
+        if cached and (now - cached[0] <= GEOCODE_CACHE_TTL_SECONDS):
+            return cached[1]
+
+        if candidate_key in COMMON_REGIONS:
+            region = COMMON_REGIONS[candidate_key]
+            result = {
+                "name": region["name"],
+                "lat": region["lat"],
+                "lon": region["lon"],
+            }
+            GEOCODE_CACHE[candidate_key] = (now, result)
+            return result
+
+        google_result = await _geocode_with_google_maps(candidate)
+        if google_result:
+            result = {
+                "name": google_result["name"],
+                "lat": google_result["lat"],
+                "lon": google_result["lon"],
+            }
+            GEOCODE_CACHE[candidate_key] = (now, result)
+            return result
+
+        open_meteo_result = await _geocode_with_open_meteo(candidate)
+        if open_meteo_result:
+            result = {
+                "name": open_meteo_result["name"],
+                "lat": open_meteo_result["lat"],
+                "lon": open_meteo_result["lon"],
+            }
+            GEOCODE_CACHE[candidate_key] = (now, result)
+            return result
+
+    return None
+
+
 async def fetch_live_aqi_snapshot(latitude: float, longitude: float) -> Optional[dict]:
     """Fetch exact AQI and key pollutants for precise coordinate grounding."""
     lat_key = round(latitude, 4)
     lon_key = round(longitude, 4)
-    cache_key = (lat_key, lon_key, AQI_PROVIDER)
+    cache_key = (lat_key, lon_key, "aqi:auto")
     now = time.time()
 
     cached = AQI_CACHE.get(cache_key)
@@ -171,57 +362,164 @@ async def fetch_live_aqi_snapshot(latitude: float, longitude: float) -> Optional
     try:
         import httpx
 
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            if AQI_PROVIDER == "waqi" and AQI_API_KEY:
-                waqi_url = f"https://api.waqi.info/feed/geo:{latitude};{longitude}/?token={AQI_API_KEY}"
-                waqi_resp = await client.get(waqi_url)
-                waqi_resp.raise_for_status()
-                waqi_data = waqi_resp.json()
+        def _to_float(value, default=0.0) -> float:
+            try:
+                return float(value)
+            except Exception:
+                return float(default)
 
-                if waqi_data.get("status") != "ok":
-                    return None
-
-                waqi_payload = waqi_data.get("data") or {}
-                iaqi = waqi_payload.get("iaqi") or {}
-                aqi_value = waqi_payload.get("aqi")
-
-                if aqi_value is None:
-                    return None
-
-                result = {
-                    "aqi": int(round(float(aqi_value))),
-                    "pm2_5": round(float((iaqi.get("pm25") or {}).get("v", 0) or 0), 2),
-                    "pm10": round(float((iaqi.get("pm10") or {}).get("v", 0) or 0), 2),
-                    "co": round(float((iaqi.get("co") or {}).get("v", 0) or 0), 2),
-                    "no2": round(float((iaqi.get("no2") or {}).get("v", 0) or 0), 2),
-                    "so2": round(float((iaqi.get("so2") or {}).get("v", 0) or 0), 2),
-                    "ozone": round(float((iaqi.get("o3") or {}).get("v", 0) or 0), 2),
-                }
-                AQI_CACHE[cache_key] = (now, result)
-                return result
-
-            url = (
-                "https://air-quality-api.open-meteo.com/v1/air-quality"
-                f"?latitude={latitude}&longitude={longitude}"
-                "&current=us_aqi,pm2_5,pm10,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone"
-            )
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            current = data.get("current") or {}
-            if current.get("us_aqi") is None:
+        def _google_index_to_aqi(payload: dict) -> Optional[int]:
+            indexes = ((payload.get("indexes") or []))
+            if not indexes:
                 return None
-            result = {
-                "aqi": int(round(current.get("us_aqi", 0))),
-                "pm2_5": round(float(current.get("pm2_5", 0) or 0), 2),
-                "pm10": round(float(current.get("pm10", 0) or 0), 2),
-                "co": round(float(current.get("carbon_monoxide", 0) or 0), 2),
-                "no2": round(float(current.get("nitrogen_dioxide", 0) or 0), 2),
-                "so2": round(float(current.get("sulphur_dioxide", 0) or 0), 2),
-                "ozone": round(float(current.get("ozone", 0) or 0), 2),
+
+            preferred = None
+            for idx in indexes:
+                idx_code = (idx.get("code") or "").lower()
+                if idx_code in {"uaqi", "us_aqi", "usaqi"}:
+                    preferred = idx
+                    break
+            if preferred is None:
+                preferred = indexes[0]
+
+            aqi_value = preferred.get("aqi")
+            if aqi_value is None:
+                return None
+            return int(round(_to_float(aqi_value, 0)))
+
+        def _google_pollutants(payload: dict) -> dict:
+            pollutants = payload.get("pollutants") or []
+            pollutant_map = {((p.get("code") or "").lower()): p for p in pollutants}
+
+            def concentration_for(*codes: str) -> float:
+                for code in codes:
+                    item = pollutant_map.get(code.lower())
+                    if not item:
+                        continue
+                    concentration = item.get("concentration") or {}
+                    value = concentration.get("value")
+                    if value is not None:
+                        return round(_to_float(value, 0), 2)
+                return 0.0
+
+            return {
+                "pm2_5": concentration_for("pm2_5", "pm25"),
+                "pm10": concentration_for("pm10"),
+                "co": concentration_for("co"),
+                "no2": concentration_for("no2"),
+                "so2": concentration_for("so2"),
+                "ozone": concentration_for("o3", "ozone"),
             }
-            AQI_CACHE[cache_key] = (now, result)
-            return result
+
+        provider_sequence: list[str] = []
+        if AQI_PROVIDER in {"auto", "google", "google-maps", "maps"} and GOOGLE_AIR_QUALITY_API_KEY:
+            provider_sequence.append("google")
+        if AQI_PROVIDER in {"auto", "waqi"} and AQI_API_KEY:
+            provider_sequence.append("waqi")
+        if AQI_PROVIDER in {"auto", "open-meteo", "openmeteo"}:
+            provider_sequence.append("open-meteo")
+
+        if not provider_sequence:
+            provider_sequence = ["open-meteo"]
+
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            for provider in provider_sequence:
+                if provider == "google":
+                    try:
+                        google_url = f"https://airquality.googleapis.com/v1/currentConditions:lookup?key={GOOGLE_AIR_QUALITY_API_KEY}"
+                        google_payload = {
+                            "location": {
+                                "latitude": latitude,
+                                "longitude": longitude,
+                            },
+                            "extraComputations": [
+                                "LOCAL_AQI",
+                                "POLLUTANT_CONCENTRATION",
+                            ],
+                            "languageCode": "en",
+                            "universalAqi": True,
+                        }
+                        google_resp = await client.post(google_url, json=google_payload)
+                        google_resp.raise_for_status()
+                        google_data = google_resp.json() or {}
+                        current_conditions = google_data.get("currentConditions") or {}
+
+                        resolved_aqi = _google_index_to_aqi(current_conditions)
+                        if resolved_aqi is not None:
+                            pollutants = _google_pollutants(current_conditions)
+                            result = {
+                                "aqi": resolved_aqi,
+                                "pm2_5": pollutants["pm2_5"],
+                                "pm10": pollutants["pm10"],
+                                "co": pollutants["co"],
+                                "no2": pollutants["no2"],
+                                "so2": pollutants["so2"],
+                                "ozone": pollutants["ozone"],
+                            }
+                            AQI_CACHE[cache_key] = (now, result)
+                            return result
+                    except Exception:
+                        pass
+
+                if provider == "waqi":
+                    try:
+                        waqi_url = f"https://api.waqi.info/feed/geo:{latitude};{longitude}/?token={AQI_API_KEY}"
+                        waqi_resp = await client.get(waqi_url)
+                        waqi_resp.raise_for_status()
+                        waqi_data = waqi_resp.json()
+
+                        if waqi_data.get("status") != "ok":
+                            continue
+
+                        waqi_payload = waqi_data.get("data") or {}
+                        iaqi = waqi_payload.get("iaqi") or {}
+                        aqi_value = waqi_payload.get("aqi")
+
+                        if aqi_value is None:
+                            continue
+
+                        result = {
+                            "aqi": int(round(_to_float(aqi_value, 0))),
+                            "pm2_5": round(_to_float((iaqi.get("pm25") or {}).get("v", 0), 0), 2),
+                            "pm10": round(_to_float((iaqi.get("pm10") or {}).get("v", 0), 0), 2),
+                            "co": round(_to_float((iaqi.get("co") or {}).get("v", 0), 0), 2),
+                            "no2": round(_to_float((iaqi.get("no2") or {}).get("v", 0), 0), 2),
+                            "so2": round(_to_float((iaqi.get("so2") or {}).get("v", 0), 0), 2),
+                            "ozone": round(_to_float((iaqi.get("o3") or {}).get("v", 0), 0), 2),
+                        }
+                        AQI_CACHE[cache_key] = (now, result)
+                        return result
+                    except Exception:
+                        pass
+
+                if provider == "open-meteo":
+                    try:
+                        url = (
+                            "https://air-quality-api.open-meteo.com/v1/air-quality"
+                            f"?latitude={latitude}&longitude={longitude}"
+                            "&current=us_aqi,pm2_5,pm10,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone"
+                        )
+                        resp = await client.get(url)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        current = data.get("current") or {}
+                        if current.get("us_aqi") is None:
+                            continue
+                        result = {
+                            "aqi": int(round(_to_float(current.get("us_aqi", 0), 0))),
+                            "pm2_5": round(_to_float(current.get("pm2_5", 0), 0), 2),
+                            "pm10": round(_to_float(current.get("pm10", 0), 0), 2),
+                            "co": round(_to_float(current.get("carbon_monoxide", 0), 0), 2),
+                            "no2": round(_to_float(current.get("nitrogen_dioxide", 0), 0), 2),
+                            "so2": round(_to_float(current.get("sulphur_dioxide", 0), 0), 2),
+                            "ozone": round(_to_float(current.get("ozone", 0), 0), 2),
+                        }
+                        AQI_CACHE[cache_key] = (now, result)
+                        return result
+                    except Exception:
+                        pass
+
+            return None
     except Exception:
         return None
 
@@ -294,6 +592,33 @@ def get_fallback_response(query: str, aqi: int, location: str, indoor_data: Opti
     return f"AQI in {location} is {aqi} ({aqi_status}). {aqi_advice}{certainty_note} Feel free to ask me about outdoor safety, indoor air quality tips, exercise recommendations, or health precautions!"
 
 
+def is_valid_grounded_reply(reply: str, location: str, aqi: int) -> bool:
+    """Validate that model output is actually grounded to fetched live data."""
+    text = (reply or "").strip().lower()
+    if not text:
+        return False
+
+    denial_markers = [
+        "i don't have",
+        "i dont have",
+        "i'm not aware",
+        "im not aware",
+        "cannot access",
+        "can't access",
+        "no data",
+        "don't have data",
+        "do not have data",
+        "for hyderabad",
+    ]
+    if any(marker in text for marker in denial_markers):
+        return False
+
+    location_token = (location or "").split("(")[0].strip().lower()
+    has_location = bool(location_token) and location_token in text
+    has_aqi = str(aqi) in text
+    return has_location and has_aqi
+
+
 # ─── Main AI Endpoint ─────────────────────────────────
 @app.post("/api/ask-ecobot")
 async def ask_ecobot(req: AIRequest):
@@ -307,15 +632,30 @@ async def ask_ecobot(req: AIRequest):
     is_grounded = False
     is_map_fast = (req.response_style or "").strip().lower() == "map_fast"
 
-    if req.latitude is not None and req.longitude is not None:
+    # Check if user is asking about a different city
+    detected_city = await extract_and_geocode_city(req.user_voice_text)
+    if detected_city:
+        # User mentioned a specific city - try to get its AQI
+        effective_location = detected_city["name"]  # Use city name even if AQI fetch fails
+        live_snapshot = await fetch_live_aqi_snapshot(detected_city["lat"], detected_city["lon"])
+        if live_snapshot:
+            effective_aqi = live_snapshot["aqi"]
+            pollutant_context = live_snapshot
+            is_grounded = True
+        else:
+            # City detected but AQI fetch failed - use fallback for this city
+            pass
+
+    # If no city detected or city AQI failed, try GPS coordinates
+    if not is_grounded and req.latitude is not None and req.longitude is not None:
         live_snapshot = await fetch_live_aqi_snapshot(req.latitude, req.longitude)
         if live_snapshot:
             effective_aqi = live_snapshot["aqi"]
             pollutant_context = live_snapshot
             is_grounded = True
-
-    if req.latitude is not None and req.longitude is not None:
-        effective_location = f"{effective_location} ({req.latitude:.5f}, {req.longitude:.5f})"
+            # Only add coordinates if not using a named city
+            if not detected_city:
+                effective_location = f"{effective_location} ({req.latitude:.5f}, {req.longitude:.5f})"
 
     if not is_grounded:
         reply = get_fallback_response(req.user_voice_text, effective_aqi, effective_location, req.indoor_data, is_grounded=False)
@@ -329,69 +669,91 @@ async def ask_ecobot(req: AIRequest):
     try:
         import httpx
 
-            # Build EcoBot system prompt with live sensor context
-            iare_context = get_iare_context(
-                query=req.user_voice_text,
-                location=req.location,
-                latitude=req.latitude,
-                longitude=req.longitude,
-            )
+        # Build EcoBot system prompt with live sensor context
+        iare_context = get_iare_context(
+            query=req.user_voice_text,
+            location=req.location,
+            latitude=req.latitude,
+            longitude=req.longitude,
+        )
 
-            system_prompt = f"""You are EcoBot, an air-quality assistant.
-Answer in {'1 short sentence' if is_map_fast else '1-2 short sentences unless user asks for detail'}.
-Use this grounded data only:
+        system_prompt = f"""You are EcoBot, a real-time air quality assistant with LIVE sensor data.
+
+IMPORTANT: You have REAL-TIME DATA for this exact location. USE IT. Never say "I don't have data" or "I'm not aware" - you DO have data below!
+
+LIVE SENSOR DATA (just fetched):
 - Location: {effective_location}
-- AQI: {effective_aqi} ({get_aqi_category(effective_aqi)})
-{f"- Pollutants: PM2.5={pollutant_context['pm2_5']}, PM10={pollutant_context['pm10']}, NO2={pollutant_context['no2']}, SO2={pollutant_context['so2']}, O3={pollutant_context['ozone']}, CO={pollutant_context['co']}" if pollutant_context else ""}
+- Current AQI: {effective_aqi} ({get_aqi_category(effective_aqi)})
+{f"- PM2.5: {pollutant_context['pm2_5']}µg/m³, PM10: {pollutant_context['pm10']}µg/m³, O3: {pollutant_context['ozone']}ppb, NO2: {pollutant_context['no2']}ppb, SO2: {pollutant_context['so2']}ppb, CO: {pollutant_context['co']}ppb" if pollutant_context else ""}
 {f"- Indoor: {req.indoor_data}" if req.indoor_data else ""}
 {iare_context if iare_context else ""}
-Give actionable advice; if AQI > 150, strongly warn."""
 
-            max_sentences = OLLAMA_MAP_MAX_SENTENCES if is_map_fast else OLLAMA_MAX_SENTENCES
-            num_ctx = OLLAMA_MAP_NUM_CTX if is_map_fast else OLLAMA_NUM_CTX
-            num_predict = OLLAMA_MAP_NUM_PREDICT if is_map_fast else OLLAMA_NUM_PREDICT
+YOUR TASK: Give {'1 short sentence' if is_map_fast else '1-2 sentences'} of health advice based on the AQI value above.
+- AQI 0-50 (Good): Safe for outdoor activities
+- AQI 51-100 (Moderate): Generally safe, sensitive groups be cautious
+- AQI 101-150 (Unhealthy for Sensitive): Sensitive groups limit outdoor time
+- AQI 151-200 (Unhealthy): Everyone reduce outdoor exertion
+- AQI 201+ (Very Unhealthy/Hazardous): Stay indoors, use masks
 
-            if not is_grounded:
-                system_prompt += "\n- Data confidence is LOW (not coordinate-grounded). Never claim exact real-time AQI certainty. Use wording like 'based on latest available app value' and ask user to enable precise location for exact live AQI." 
+Always mention the location name and AQI number in your response."""
 
-            payload = {
-                "model": OLLAMA_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": req.user_voice_text}
-                ],
-                "stream": True, # ENABLE STREAMING
-                "keep_alive": OLLAMA_KEEP_ALIVE,
-                "options": {
-                    "num_ctx": num_ctx,
-                    "num_predict": num_predict,
-                    "temperature": OLLAMA_TEMPERATURE
-                }
+        max_sentences = OLLAMA_MAP_MAX_SENTENCES if is_map_fast else OLLAMA_MAX_SENTENCES
+        num_ctx = OLLAMA_MAP_NUM_CTX if is_map_fast else OLLAMA_NUM_CTX
+        num_predict = OLLAMA_MAP_NUM_PREDICT if is_map_fast else OLLAMA_NUM_PREDICT
+
+        if not is_grounded:
+            system_prompt += "\n- Data confidence is LOW (not coordinate-grounded). Never claim exact real-time AQI certainty. Use wording like 'based on latest available app value' and ask user to enable precise location for exact live AQI."
+
+        original_user_text = req.user_voice_text
+        user_query_for_llm = f"{original_user_text}\n\n[SYSTEM INTERVENTION: Use the LIVE SENSOR DATA provided above to answer this query. Do NOT claim you cannot access real-time data, since the system has already fetched it for you.]"
+
+        payload = {
+            "model": OLLAMA_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_query_for_llm}
+            ],
+            "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "options": {
+                "num_ctx": num_ctx,
+                "num_predict": num_predict,
+                "temperature": OLLAMA_TEMPERATURE
             }
+        }
 
-            async def stream_generator():
-                full_text = ""
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as response:
-                        async for line in response.aiter_lines():
-                            if line:
-                                try:
-                                    data = json.loads(line)
-                                    if "message" in data and "content" in data["message"]:
-                                        chunk = data["message"]["content"]
-                                        full_text += chunk
-                                        # Yield exactly the format Server-Sent Events (SSE) expects
-                                        yield f"data: {json.dumps({'text': chunk, 'source': 'ollama', 'model': OLLAMA_MODEL})}\n\n"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+            response.raise_for_status()
+            data = response.json()
 
-                                        if max_sentences > 0:
-                                            sentence_count = len(re.findall(r"[.!?](?:\s|$)", full_text))
-                                            if sentence_count >= max_sentences:
-                                                break
-                                except Exception:
-                                    pass
-                        yield "data: [DONE]\n\n"
-            
-            return StreamingResponse(stream_generator(), media_type="text/event-stream")
+        model_text = (((data.get("message") or {}).get("content")) or "").strip()
+
+        if max_sentences > 0 and model_text:
+            sentence_endings = list(re.finditer(r"[.!?](?:\s|$)", model_text))
+            if len(sentence_endings) >= max_sentences:
+                cut_at = sentence_endings[max_sentences - 1].end()
+                model_text = model_text[:cut_at].strip()
+
+        if not is_valid_grounded_reply(model_text, effective_location, effective_aqi):
+            model_text = get_fallback_response(
+                req.user_voice_text,
+                effective_aqi,
+                effective_location,
+                req.indoor_data,
+                is_grounded=True,
+            )
+            source = "fallback"
+            model_name = "built-in"
+        else:
+            source = "ollama"
+            model_name = OLLAMA_MODEL
+
+        async def guarded_generator():
+            yield f"data: {json.dumps({'text': model_text, 'source': source, 'model': model_name})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(guarded_generator(), media_type="text/event-stream")
 
     except Exception as e:
         print(f"[EcoBot] Ollama error, falling back: {e}")
@@ -475,6 +837,8 @@ async def get_status():
         "active_model": OLLAMA_MODEL,
         "aqi_provider": AQI_PROVIDER,
         "aqi_key_configured": bool(AQI_API_KEY),
+        "google_maps_key_configured": bool(GOOGLE_MAPS_API_KEY),
+        "google_air_quality_key_configured": bool(GOOGLE_AIR_QUALITY_API_KEY),
         "available_models": models,
         "tts_voice": TTS_VOICE
     }
