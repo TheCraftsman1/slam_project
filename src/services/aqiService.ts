@@ -27,3 +27,29 @@ export async function fetchAqiForLocation(lat: number, lng: number): Promise<Aqi
     return { data: null, error: message };
   }
 }
+
+export interface HistoricalAqiFetchResult {
+  data: any | null;
+  error: string | null;
+}
+
+export async function fetchHistoricalAqi(lat: number, lng: number, startDate: string, endDate: string): Promise<HistoricalAqiFetchResult> {
+  try {
+    const data = await fetchWithRetry(async () => {
+      const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&hourly=us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone&start_date=${startDate}&end_date=${endDate}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const json = await resp.json();
+      return json?.hourly ?? null;
+    }, { maxRetries: 2, baseDelay: 500 });
+
+    return { data, error: null };
+  } catch (error) {
+    const message = isNetworkError(error)
+      ? 'Network unavailable'
+      : 'Failed to fetch historical AQI data';
+    return { data: null, error: message };
+  }
+}

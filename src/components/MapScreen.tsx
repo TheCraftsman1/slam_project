@@ -198,6 +198,8 @@ export function MapScreen() {
   // Map options
   const mapOptions = {
     disableDefaultUI: true,
+    zoomControl: true,
+    zoomControlOptions: { position: 9 }, // RIGHT_BOTTOM
     styles: [
       { featureType: 'poi', stylers: [{ visibility: 'off' }] },
       { featureType: 'transit', stylers: [{ visibility: 'off' }] },
@@ -231,7 +233,7 @@ export function MapScreen() {
         <GoogleMap
           mapContainerStyle={{ width: '100%', height: '100%' }}
           center={center}
-          zoom={6}
+          zoom={18}
           onLoad={onLoad}
           onUnmount={onUnmount}
           options={mapOptions}

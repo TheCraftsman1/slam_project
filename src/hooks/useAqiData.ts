@@ -93,7 +93,12 @@ export function useAqiData() {
 
     // Add placeholder
     const placeholder: AqiStation = { id, name, lat, lng, aqi: 0, airData: null, loading: true, ...opts };
-    setStations(prev => [...prev, placeholder]);
+    
+    setStations(prev => {
+      // Remove any previous tapped stations that were auto-generated
+      const withoutOldTapped = opts?.isTapped ? prev.filter(s => !s.isTapped || s.id === id) : prev;
+      return [...withoutOldTapped, placeholder];
+    });
     setTappedLoading(id);
 
     // Fetch real AQI
@@ -171,8 +176,23 @@ export function useAqiData() {
     const totalSteps = PRELOAD_CITIES.length + 1; // +1 for user location
 
     setInitProgress({ step: 0, total: totalSteps, label: 'Detecting your location...', done: false });
+      // HARDCODED IARE 5TH BLOCK INIT
+      setTimeout(async () => {
+        setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
+        const name = "5th Block, IARE"; 
+        await addStationRef.current(17.599799, 78.418182, name, { isUserLocation: true });
 
-    if ("geolocation" in navigator) {
+        // Load preload cities
+        for (let i = 0; i < PRELOAD_CITIES.length; i++) {
+          await new Promise(r => setTimeout(r, 400));
+          const c = PRELOAD_CITIES[i];
+          setInitProgress({ step: i + 2, total: totalSteps, label: `Loading ${c.name}...`, done: false });
+          await addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
+        }
+
+        setInitProgress(prev => ({ ...prev, done: true }));
+      }, 500);
+      /* ORIGINAL CODE COMMENTED OUT    if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           const { latitude: lat, longitude: lon } = pos.coords;
@@ -184,22 +204,23 @@ export function useAqiData() {
           setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
           addStationRef.current(17.6868, 83.2185, 'Visakhapatnam', { isUserLocation: true });
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
-    } else {
-      setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
-      addStationRef.current(17.6868, 83.2185, 'Visakhapatnam', { isUserLocation: true });
-    }
+//         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+//       );
+//     } else {
+//       setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
+//       addStationRef.current(17.6868, 83.2185, 'Visakhapatnam', { isUserLocation: true });
+//     }
 
-    // Load preload cities
-    for (let i = 0; i < PRELOAD_CITIES.length; i++) {
-      await new Promise(r => setTimeout(r, 400));
-      const c = PRELOAD_CITIES[i];
-      setInitProgress({ step: i + 2, total: totalSteps, label: `Loading ${c.name}...`, done: false });
-      addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
-    }
+//     // Load preload cities
+//     for (let i = 0; i < PRELOAD_CITIES.length; i++) {
+//       await new Promise(r => setTimeout(r, 400));
+//       const c = PRELOAD_CITIES[i];
+//       setInitProgress({ step: i + 2, total: totalSteps, label: `Loading ${c.name}...`, done: false });
+//       addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
+//     }
 
-    setInitProgress(prev => ({ ...prev, done: true }));
+//     setInitProgress(prev => ({ ...prev, done: true }));
+//     */
   }, []);
 
   return {

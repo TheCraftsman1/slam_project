@@ -74,11 +74,11 @@ Work through each phase systematically. Check off items as completed.
 ## PHASE 3: New Features (Priority: MEDIUM)
 
 ### 3.1 Historical Data
-- [ ] Design historical data UI
-- [ ] Implement date range selector
-- [ ] Add line chart component
-- [ ] Create statistics summary panel
-- [ ] Add data export functionality
+- [x] Design historical data UI
+- [x] Implement date range selector
+- [x] Add line chart component
+- [x] Create statistics summary panel
+- [x] Add data export functionality
 
 ### 3.2 Notification System
 - [ ] Request notification permissions
