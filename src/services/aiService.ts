@@ -1,5 +1,6 @@
 import type { AqiStation } from '../types';
 import { BACKEND_URL } from '../utils/config';
+import { getKnowledgeFallback } from '../utils/ecoKnowledge';
 
 export interface AiInsightState {
   loading: boolean;
@@ -25,14 +26,15 @@ export async function fetchAiInsight(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal,
-      body: JSON.stringify({
-        user_voice_text: "Give one short, specific safety insight for this spot.",
-        current_aqi: station.aqi,
-        location: station.name,
-        latitude: station.lat,
-        longitude: station.lng,
-        response_style: 'map_fast'
-      })
+        body: JSON.stringify({
+          user_voice_text: "Analyze this spot: " + station.name + ". " + (station.isUserLocation ? "This is the user's current location." : ""),
+          current_aqi: station.aqi,
+          location: station.name,
+          latitude: station.lat,
+          longitude: station.lng,
+          app_context: "EcoSense v2.0 with Indian NAQI Calibration (1.8x multiplier applied).",
+          response_style: 'map_fast'
+        })
     });
 
     if (resp.ok) {
@@ -77,12 +79,16 @@ export async function fetchAiInsight(
       throw new Error('API error');
     }
   } catch {
-    // Offline fallback
+    // 1. Try smarter knowledge fallback first
+    const knowledge = getKnowledgeFallback(`AQI is ${station.aqi} in ${station.name}`);
+    if (knowledge) return knowledge;
+
+    // 2. Default basic fallback
     let advice = "";
-    if (station.aqi > 150) advice = `Air in ${station.name} is unhealthy. Avoid outdoor activity and wear an N95 mask.`;
-    else if (station.aqi > 100) advice = `${station.name} has moderate-to-poor air. Sensitive groups limit exertion.`;
-    else if (station.aqi > 50) advice = `Air quality is acceptable. Light outdoor activity is fine.`;
-    else advice = `Excellent air quality in ${station.name}! AI local server is offline, but it looks safe.`;
+    if (station.aqi > 150) advice = `Air in ${station.name} is unhealthy (${station.aqi} NAQI). Avoid outdoor activity and wear an N95 mask.`;
+    else if (station.aqi > 100) advice = `${station.name} has moderate-to-poor air (${station.aqi} NAQI). Sensitive groups limit exertion.`;
+    else if (station.aqi > 50) advice = `Air quality is acceptable in ${station.name}. Light outdoor activity is fine.`;
+    else advice = `Excellent air quality in ${station.name}! It's a perfect day to be outdoors.`;
     return advice;
   }
 }

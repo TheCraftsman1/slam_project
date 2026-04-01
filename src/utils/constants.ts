@@ -48,4 +48,4 @@ export const DEFAULT_IARE_COLLEGE: IareCollegeData = {
   ]
 };
 
-export const DEFAULT_CENTER = { lat: 17.6868, lng: 83.2185 }; // Vizag default
+export const DEFAULT_CENTER = { lat: 17.6001, lng: 78.4175 }; // Default to IARE center instead of Vizag

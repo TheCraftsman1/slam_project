@@ -21,35 +21,43 @@ export function BuildingLabel({ name, aqi, onClick, isMainCampus }: BuildingLabe
         onClick();
       }}
     >
-      {/* High-end glassmorphism label that pops on satellite & normal maps */}
-      <div className={`relative flex items-center px-3.5 py-1.5 rounded-full backdrop-blur-md border shadow-[0_10px_25px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-all duration-300 origin-bottom transform-gpu flex-nowrap ${
-        isMainCampus ? 'bg-[#0f1729]/90 border-white/20' : 'bg-[#0b1120]/80 border-white/10 group-hover:bg-[#0f1729]/95 group-hover:border-blue-500/50'
+      {/* ── Label Pill ── */}
+      <div className={`relative flex items-center px-3 py-1.5 rounded-full backdrop-blur-xl border transition-all duration-250 origin-bottom transform-gpu flex-nowrap ${
+        isMainCampus
+          ? 'bg-[#0f1729]/90 border-white/15 shadow-[0_6px_20px_rgba(0,0,0,0.45)]'
+          : 'bg-[#0a0f1a]/85 border-white/[0.08] shadow-[0_6px_20px_rgba(0,0,0,0.45)] group-hover:scale-105 group-hover:bg-[#0f1729]/95 group-hover:border-white/15'
       }`}>
-        {/* Futuristic glowing indicator dot */}
-        <div className={`w-1.5 h-1.5 rounded-full mr-2.5 shrink-0 ${
-          isMainCampus && aqiColors ? `${aqiColors.bg} shadow-[0_0_8px_${aqiColors.hex}] ring-2 ring-white/20` : 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,1)] ring-2 ring-blue-400/20'
-        }`} />
+        {/* Indicator dot */}
+        <div className={`w-1.5 h-1.5 rounded-full mr-2 shrink-0 ${
+          isMainCampus && aqiColors
+            ? `${aqiColors.bg} ring-2 ring-white/15`
+            : 'bg-cyan-400 ring-2 ring-cyan-400/20'
+        }`}
+          style={isMainCampus && aqiColors ? { boxShadow: `0 0 8px ${aqiColors.hex}` } : { boxShadow: '0 0 8px rgba(6,182,212,0.6)' }}
+        />
         
-        {/* Clean, responsive-feeling typography */}
-        <span className={`text-[10.5px] font-extrabold uppercase tracking-[0.15em] whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] ${
-          isMainCampus ? 'text-white' : 'text-slate-200 group-hover:text-white'
+        {/* Name */}
+        <span className={`text-[10px] font-bold uppercase tracking-[0.12em] whitespace-nowrap ${
+          isMainCampus ? 'text-white' : 'text-slate-200/90 group-hover:text-white'
         }`}>
           {name}
         </span>
 
-        {/* AQI Badge inside the label for the main campus */}
+        {/* AQI Badge */}
         {isAqiValid && aqiColors && (
-          <div className="flex items-center ml-2 border-l border-white/20 pl-2">
-            <span className={`text-[10px] font-black ${aqiColors.text} tracking-wider`}>
+          <div className="flex items-center ml-2 border-l border-white/15 pl-2">
+            <span className={`text-[10px] font-extrabold ${aqiColors.text} tracking-wider tabular-nums`}>
               AQI {aqi}
             </span>
           </div>
         )}
       </div>
 
-      {/* Vertical Map tether / stem linking the label to the exact coordinate */}
-      <div className={`w-[1.5px] h-3.5 transition-colors duration-300 ${
-        isMainCampus ? 'bg-gradient-to-b from-white/50 to-transparent' : 'bg-gradient-to-b from-white/30 to-transparent group-hover:from-blue-500/60'
+      {/* ── Stem ── */}
+      <div className={`w-px h-3 transition-colors duration-300 ${
+        isMainCampus
+          ? 'bg-gradient-to-b from-white/40 to-transparent'
+          : 'bg-gradient-to-b from-white/25 to-transparent group-hover:from-cyan-400/50'
       }`} />
     </div>
   );

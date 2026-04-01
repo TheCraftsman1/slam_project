@@ -28,7 +28,7 @@ import { AqiBottomSheet } from './sheets';
 
 const libraries: ("places")[] = ["places"];
 
-export function MapScreen() {
+export function MapScreen({ onNavigate }: { onNavigate?: (tab: any) => void }) {
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -97,7 +97,7 @@ export function MapScreen() {
 
   // Initialize on mount
   useEffect(() => {
-    initialize();
+    // initialize(); handled globally
   }, [initialize]);
 
   // Autocomplete select handler
@@ -215,19 +215,19 @@ export function MapScreen() {
   // Loading state
   if (!isLoaded) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-[#0b1120] gap-4">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-surface gap-4">
         <div className="relative">
-          <div className="w-14 h-14 rounded-full border-2 border-blue-500/20" />
-          <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-blue-500 animate-spin" />
+          <div className="w-14 h-14 rounded-full border-2 border-accent/20" />
+          <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-accent animate-spin" />
         </div>
-        <span className="text-sm text-slate-400 font-semibold">Loading Air Quality Map...</span>
+        <span className="text-[13px] text-slate-400 font-semibold font-display">Loading Air Quality Map</span>
         <span className="text-[10px] text-slate-600">Real-time data from 16+ cities</span>
       </div>
     );
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#0b1120] font-display flex flex-col">
+    <div className="relative h-full w-full overflow-hidden bg-surface font-sans flex flex-col">
       {/* Map */}
       <div className="absolute inset-0 z-0">
         <GoogleMap
@@ -321,7 +321,7 @@ export function MapScreen() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
           >
-            <div className="bg-[#141820]/90 backdrop-blur-2xl border border-white/[0.08] rounded-3xl p-6 shadow-[0_20px_40px_rgba(0,0,0,0.5)] flex flex-col items-center text-center max-w-[280px] pointer-events-auto">
+            <div className="bg-card border border-border-subtle rounded-[24px] p-6 shadow-minimal flex flex-col items-center text-center max-w-[280px] pointer-events-auto">
               <div className="w-16 h-16 rounded-full bg-slate-800/80 mb-4 flex items-center justify-center border border-white/[0.05]">
                 <MapPin size={24} className="text-slate-500" />
               </div>
@@ -329,7 +329,7 @@ export function MapScreen() {
               <p className="text-xs text-slate-400 mb-5">There are no air quality stations near this location. Try searching for a different area.</p>
               <button
                 onClick={handleLocateMe}
-                className="w-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-bold py-2.5 rounded-xl border border-blue-500/30 transition-colors text-sm flex items-center justify-center gap-2"
+                className="w-full bg-surface hover:bg-border-subtle text-text-main font-bold py-2.5 rounded-xl border border-border-strong transition-colors text-sm flex items-center justify-center gap-2 shadow-sm"
               >
                 <Crosshair size={14} />
                 Return to My Location
@@ -366,12 +366,12 @@ export function MapScreen() {
       {/* Tap Instruction Toast */}
       {stations.length <= 1 && initProgress.done && (
         <motion.div
-          className="absolute bottom-[200px] md:top-[140px] md:bottom-auto left-1/2 -translate-x-1/2 z-[500] bg-blue-500/15 backdrop-blur-xl border border-blue-500/20 rounded-full px-4 py-2 pointer-events-none shadow-xl"
+          className="absolute bottom-[200px] md:top-[140px] md:bottom-auto left-1/2 -translate-x-1/2 z-[500] bg-text-main text-text-inverse rounded-full px-4 py-2 pointer-events-none shadow-minimal"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
         >
-          <span className="text-[11px] font-semibold text-blue-300 drop-shadow-md">👆 Tap anywhere on the map to manually fetch live AQI</span>
+          <span className="text-[11px] font-semibold text-text-inverse opacity-90 drop-shadow-md">👆 Tap anywhere on the map to check live AQI</span>
         </motion.div>
       )}
 
@@ -406,7 +406,7 @@ export function MapScreen() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.3 }}
             >
-              <div className="bg-[#0f1729]/90 backdrop-blur-xl border border-white/[0.08] rounded-2xl px-4 py-3 shadow-xl">
+              <div className="bg-card border border-border-subtle rounded-2xl px-4 py-3 shadow-minimal">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Loading Stations</span>
                   <span className="text-[10px] font-bold text-blue-400 tabular-nums">
@@ -431,6 +431,7 @@ export function MapScreen() {
       {/* Bottom Sheet */}
       <AqiBottomSheet
         selectedStation={selectedStation}
+        onNavigate={onNavigate}
         stations={stations}
         isExpanded={isSheetExpanded}
         activeMetric={activeMetric}

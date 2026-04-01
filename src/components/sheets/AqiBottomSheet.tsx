@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { MapPin, Clock, Trash2, RefreshCw, ChevronDown, ChevronUp, Navigation, Bot, Loader2, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { MapPin, Clock, Trash2, RefreshCw, ChevronDown, ChevronUp, Navigation, Bot, Loader2, AlertTriangle, TrendingUp, TrendingDown, Minus, Activity } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from 'motion/react';
 import type { AqiStation, MetricKey, AirQualityData } from '../../types';
 import type { AiInsightState } from '../../services/aiService';
@@ -73,6 +73,7 @@ interface AqiBottomSheetProps {
   onRemoveStation: (stationId: string) => void;
   onMetricChange: (metric: MetricKey) => void;
   onPanTo: (lat: number, lng: number) => void;
+  onNavigate?: (tab: any) => void;
 }
 
 export function AqiBottomSheet({
@@ -87,6 +88,7 @@ export function AqiBottomSheet({
   onRemoveStation,
   onMetricChange,
   onPanTo,
+  onNavigate,
 }: AqiBottomSheetProps) {
   const selectedColors = selectedStation ? getAqiColor(selectedStation.aqi) : getAqiColor(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -127,7 +129,7 @@ export function AqiBottomSheet({
 
   return (
     <motion.div
-      className="absolute bottom-[90px] left-4 right-4 z-[500] bg-[#0f1729]/90 backdrop-blur-2xl rounded-3xl border border-white/[0.1] pt-3 pb-6 px-5 shadow-[0_15px_50px_rgba(0,0,0,0.6)] flex flex-col mx-auto max-w-md"
+      className="absolute bottom-[90px] left-4 right-4 z-[500] bg-surface border border-border-subtle rounded-3xl pt-3 pb-6 px-5 shadow-minimal flex flex-col mx-auto max-w-md"
       initial={false}
       animate={{
         height: isExpanded && selectedStation ? 'auto' : '100px',
@@ -225,6 +227,15 @@ export function AqiBottomSheet({
                 </div>
               </div>
               <div className="flex gap-1">
+                {onNavigate && (
+                  <button
+                    className="p-2 text-slate-600 hover:text-accent transition-colors"
+                    onClick={(e) => { e.stopPropagation(); onNavigate('details'); }}
+                    title="View Details & History"
+                  >
+                    <Activity size={16} />
+                  </button>
+                )}
                 {selectedStation.isTapped && (
                   <button
                     className="p-2 text-slate-600 hover:text-red-400 transition-colors"
@@ -423,19 +434,18 @@ export function AqiBottomSheet({
                       </div>
                     )}
 
-                    {/* EcoBot Live Local AI Insight */}
-                    <div className="bg-[#0b1120] border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.1)_inset] rounded-2xl p-4 flex flex-col gap-3 mb-4 relative overflow-hidden">
-                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent opacity-50" />
+                    {/* EcoBot Live Local AI Ins                    <div className="bg-card border border-border-heavy rounded-2xl p-4 flex flex-col gap-3 mb-4 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-accent/40 to-transparent opacity-50" />
 
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center relative">
-                            <Bot className="text-blue-400" size={14} />
-                            {aiInsight.loading && <div className="absolute inset-0 rounded-full border border-blue-400 border-t-transparent animate-spin" />}
+                          <div className="w-6 h-6 rounded-full bg-accent/10 flex items-center justify-center relative">
+                            <Bot className="text-accent" size={14} />
+                            {aiInsight.loading && <div className="absolute inset-0 rounded-full border border-accent border-t-transparent animate-spin" />}
                           </div>
-                          <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                          <span className="text-[10px] font-black text-accent uppercase tracking-[0.18em] flex items-center gap-2">
                             Local AI Core
-                          </span>
+                          </span>   </span>
                         </div>
 
                         {!aiInsight.loading && (
@@ -468,14 +478,14 @@ export function AqiBottomSheet({
                       <motion.button
                         whileTap={{ scale: 0.97 }}
                         onClick={() => triggerHaptic('medium')}
-                        className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 shadow-[0_4px_15px_rgba(59,130,246,0.3)] transition-colors text-sm"
+                        className="bg-accent hover:bg-accent/90 text-text-inverse font-bold py-3 rounded-2xl flex items-center justify-center gap-2 shadow-sm transition-all text-sm"
                       >
                         <Navigation size={14} />
                         Navigate
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.97 }}
-                        className="bg-white/[0.06] hover:bg-white/[0.1] text-white font-bold py-3 rounded-2xl border border-white/[0.08] transition-colors text-sm flex items-center justify-center gap-2"
+                        className="bg-card hover:bg-border-subtle border border-border-strong text-text-main font-bold py-3 rounded-2xl transition-all text-sm flex items-center justify-center gap-2"
                         onClick={() => {
                           triggerHaptic('light');
                           onRefreshStation(selectedStation.id);
@@ -494,8 +504,8 @@ export function AqiBottomSheet({
       ) : (
         /* No station selected */
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-            <MapPin size={18} className="text-blue-400" />
+          <div className="w-10 h-10 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center shrink-0">
+            <MapPin size={18} className="text-accent" />
           </div>
           <div>
             <p className="text-sm font-bold text-white">Tap any location</p>

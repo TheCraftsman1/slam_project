@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Mic, MicOff, Send, Bot, User, Sparkles, Volume2, VolumeX, Wifi, WifiOff, Settings, Loader2, Square } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BACKEND_URL } from '../utils/config';
+import { getKnowledgeFallback, ECO_KNOWLEDGE } from '../utils/ecoKnowledge';
 
 // ─── Types ───────────────────────────────────────────
 interface Message {
@@ -128,6 +129,10 @@ export function AssistantScreen() {
   };
 
   const buildDeterministicReply = (query: string, context: EnvContext): string => {
+    // 1. Check for specific EcoSense knowledge matches first
+    const knowledgeMatch = getKnowledgeFallback(query);
+    if (knowledgeMatch) return knowledgeMatch;
+
     const targetLocation = extractTargetLocationFromQuery(query) || context.location || 'your area';
     const aqiValue = Number.isFinite(context.aqi) ? context.aqi : 50;
 
@@ -587,11 +592,11 @@ export function AssistantScreen() {
   ];
 
   return (
-    <div className="h-full w-full flex flex-col bg-[#0b1120] font-display relative overflow-hidden">
+    <div className="h-full w-full flex flex-col bg-surface font-display relative overflow-hidden">
       {/* Ambient glow */}
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-[20%] w-[60%] h-[30%] bg-blue-500/[0.06] rounded-full blur-[120px]" />
-        <div className="absolute bottom-[20%] right-[-10%] w-[40%] h-[30%] bg-cyan-500/[0.04] rounded-full blur-[100px]" />
+        <div className="absolute top-[-10%] left-[20%] w-[60%] h-[30%] bg-accent/[0.06] rounded-full blur-[120px]" />
+        <div className="absolute bottom-[20%] right-[-10%] w-[40%] h-[30%] bg-accent/[0.04] rounded-full blur-[100px]" />
       </div>
 
       {/* Header */}
@@ -601,20 +606,20 @@ export function AssistantScreen() {
         animate={{ y: 0, opacity: 1 }}
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-[0_0_15px_rgba(59,130,246,0.3)]">
-            <Sparkles size={20} className="text-white" />
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent to-accent/80 flex items-center justify-center shadow-[0_0_15px_rgba(107,142,94,0.3)]">
+            <Sparkles size={20} className="text-text-inverse" />
           </div>
           <div className="flex-1">
-            <h1 className="text-lg font-bold text-white">EcoBot Assistant</h1>
+            <h1 className="text-lg font-bold text-text-main">EcoBot Assistant</h1>
             <div className="flex items-center gap-1.5">
               {backendOnline === null ? (
-                <Loader2 size={10} className="text-yellow-400 animate-spin" />
+                <Loader2 size={10} className="text-yellow-500 animate-spin" />
               ) : backendOnline ? (
-                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
               ) : (
                 <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
               )}
-              <span className={`text-[10px] font-semibold ${backendOnline ? 'text-green-400' : backendOnline === false ? 'text-red-400' : 'text-yellow-400'}`}>
+              <span className={`text-[10px] font-semibold ${backendOnline ? 'text-accent' : backendOnline === false ? 'text-red-400' : 'text-yellow-500'}`}>
                 {backendOnline ? 'Online • AI Powered' : backendOnline === false ? 'Backend Offline' : 'Connecting...'}
               </span>
             </div>
@@ -624,14 +629,14 @@ export function AssistantScreen() {
           <div className="flex gap-1.5">
             <button
               onClick={() => setAutoSpeak(!autoSpeak)}
-              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 ${autoSpeak ? 'bg-blue-500/15 border border-blue-500/25 text-blue-400' : 'bg-white/[0.05] border border-white/[0.08] text-slate-500'}`}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 ${autoSpeak ? 'bg-accent/15 border border-accent/25 text-accent' : 'bg-border-subtle border border-border-strong text-text-sub'}`}
               title={autoSpeak ? 'Voice On' : 'Voice Off'}
             >
               {autoSpeak ? <Volume2 size={14} /> : <VolumeX size={14} />}
             </button>
             <button
               onClick={() => setShowStatus(!showStatus)}
-              className="w-9 h-9 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-slate-500 hover:text-white transition-all active:scale-90"
+              className="w-9 h-9 rounded-xl bg-border-subtle border border-border-strong flex items-center justify-center text-text-sub hover:text-text-main transition-all active:scale-90"
             >
               <Settings size={14} />
             </button>
@@ -647,57 +652,57 @@ export function AssistantScreen() {
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden"
             >
-              <div className="mt-3 bg-white/[0.03] border border-white/[0.06] rounded-2xl p-3 space-y-2">
+              <div className="mt-3 bg-border-subtle border border-border-subtle rounded-2xl p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Backend</span>
-                  <span className={`text-[10px] font-bold ${backendOnline ? 'text-green-400' : 'text-red-400'}`}>
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">Backend</span>
+                  <span className={`text-[10px] font-bold ${backendOnline ? 'text-accent' : 'text-red-400'}`}>
                     {backendOnline ? '● Connected' : '● Offline'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">AI Engine</span>
-                  <span className="text-[10px] font-bold text-slate-300">{ollamaStatus}</span>
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">AI Engine</span>
+                  <span className="text-[10px] font-bold text-text-sub">{ollamaStatus}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Endpoint</span>
-                  <span className="text-[10px] font-bold text-slate-300">{activeBackendUrl}</span>
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">Endpoint</span>
+                  <span className="text-[10px] font-bold text-text-sub">{activeBackendUrl}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Local Context</span>
-                  <span className={`text-[10px] font-bold ${envContext.resolved ? 'text-blue-400' : 'text-slate-500 animate-pulse'}`}>
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">Local Context</span>
+                  <span className={`text-[10px] font-bold ${envContext.resolved ? 'text-accent' : 'text-text-sub animate-pulse'}`}>
                     {envContext.location} (AQI: {envContext.aqi || '--'})
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Voice</span>
-                  <span className="text-[10px] font-bold text-slate-300">
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">Voice</span>
+                  <span className="text-[10px] font-bold text-text-sub">
                     {autoSpeak ? 'Neural TTS (AriaNeural)' : 'Disabled'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Output Guard</span>
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">Output Guard</span>
                   <button
                     onClick={() => setStrictOutputMode(!strictOutputMode)}
-                    className={`text-[10px] font-bold px-2 py-1 rounded-full transition-colors ${strictOutputMode ? 'bg-emerald-500/15 text-emerald-400' : 'bg-white/[0.06] text-slate-400'}`}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-full transition-colors ${strictOutputMode ? 'bg-accent/15 text-accent' : 'bg-border-subtle text-text-sub'}`}
                   >
                     {strictOutputMode ? 'ON' : 'OFF'}
                   </button>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Speech Input</span>
-                  <span className="text-[10px] font-bold text-slate-300">
+                  <span className="text-[10px] text-text-sub font-bold uppercase tracking-wider">Speech Input</span>
+                  <span className="text-[10px] font-bold text-text-sub">
                     {SpeechRecognitionClass ? 'Web Speech API ✓' : 'Not Supported'}
                   </span>
                 </div>
                 {!backendOnline && (
-                  <div className="pt-2 border-t border-white/[0.05]">
-                    <p className="text-[10px] text-yellow-400/80 leading-relaxed">
-                      Start backend: <span className="font-mono bg-white/[0.05] px-1.5 py-0.5 rounded">python -m uvicorn main:app --app-dir backend_ai --port 8000</span>
+                  <div className="pt-2 border-t border-border-subtle">
+                    <p className="text-[10px] text-yellow-500/80 leading-relaxed">
+                      Start backend: <span className="font-mono bg-border-subtle px-1.5 py-0.5 rounded">python -m uvicorn main:app --app-dir backend_ai --port 8000</span>
                     </p>
                   </div>
                 )}
-                <div className="pt-2 border-t border-white/[0.05]">
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                <div className="pt-2 border-t border-border-subtle">
+                  <p className="text-[10px] text-text-sub leading-relaxed">
                     Commands: <span className="font-mono">/help</span> <span className="font-mono">/status</span> <span className="font-mono">/locate</span> <span className="font-mono">/clear</span> <span className="font-mono">/aqi &lt;place&gt;</span>
                   </p>
                 </div>
@@ -719,25 +724,25 @@ export function AssistantScreen() {
               transition={{ duration: 0.3 }}
             >
               {msg.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-full bg-blue-500/15 flex items-center justify-center mr-2 mt-1 shrink-0">
-                  <Bot size={14} className="text-blue-400" />
+                <div className="w-7 h-7 rounded-full bg-accent/15 flex items-center justify-center mr-2 mt-1 shrink-0">
+                  <Bot size={14} className="text-accent" />
                 </div>
               )}
-              <div className={`max-w-[80%] ${
+              <div className={`max-w-[85%] ${
                 msg.role === 'user'
-                  ? 'bg-blue-500 text-white rounded-2xl rounded-br-md px-4 py-3'
-                  : 'glass-card rounded-2xl rounded-bl-md px-4 py-3'
+                  ? 'bg-accent text-text-inverse rounded-2xl rounded-tr-none px-4.5 py-3.5 shadow-lg shadow-accent/20'
+                  : 'bg-card border border-border-subtle rounded-2xl rounded-tl-none px-4.5 py-3.5 shadow-sm'
               }`}>
-                <p className={`text-sm leading-relaxed whitespace-pre-line ${msg.role === 'user' ? 'text-white' : 'text-slate-200'}`}>
+                <p className={`text-[15px] leading-relaxed whitespace-pre-line ${msg.role === 'user' ? 'text-text-inverse font-medium' : 'text-text-main'}`}>
                   {msg.content}
                 </p>
                 <div className="flex items-center gap-2 mt-1.5">
-                  <span className={`text-[9px] ${msg.role === 'user' ? 'text-blue-200' : 'text-slate-500'}`}>
+                  <span className={`text-[9px] ${msg.role === 'user' ? 'text-accent/70' : 'text-text-sub'}`}>
                     {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                   {msg.source && msg.role === 'assistant' && (
                     <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${
-                      msg.source === 'ollama' ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-slate-500'
+                      msg.source === 'ollama' ? 'bg-accent/15 text-accent' : 'bg-border-subtle text-text-sub'
                     }`}>
                       {msg.source === 'ollama' ? `⚡ ${msg.model}` : '● built-in'}
                     </span>
@@ -746,7 +751,7 @@ export function AssistantScreen() {
                   {msg.role === 'assistant' && backendOnline && (
                     <button
                       onClick={() => speakText(msg.content)}
-                      className="text-slate-600 hover:text-blue-400 transition-colors ml-auto"
+                      className="text-text-sub hover:text-accent transition-colors ml-auto"
                       title="Play voice"
                     >
                       <Volume2 size={12} />
@@ -755,8 +760,8 @@ export function AssistantScreen() {
                 </div>
               </div>
               {msg.role === 'user' && (
-                <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center ml-2 mt-1 shrink-0">
-                  <User size={14} className="text-slate-300" />
+                <div className="w-7 h-7 rounded-full bg-border-subtle flex items-center justify-center ml-2 mt-1 shrink-0">
+                  <User size={14} className="text-text-sub" />
                 </div>
               )}
             </motion.div>
@@ -771,15 +776,15 @@ export function AssistantScreen() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
               >
-                <div className="w-7 h-7 rounded-full bg-blue-500/15 flex items-center justify-center mr-2 shrink-0">
-                  <Bot size={14} className="text-blue-400" />
+                <div className="w-7 h-7 rounded-full bg-accent/15 flex items-center justify-center mr-2 shrink-0">
+                  <Bot size={14} className="text-accent" />
                 </div>
-                <div className="glass-card rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-1.5">
+                <div className="bg-card border border-border-subtle rounded-2xl rounded-tl-none px-4 py-3 flex items-center gap-1.5 shadow-sm">
                   {[0, 1, 2].map(i => (
                     <motion.div
                       key={i}
-                      className="w-2 h-2 rounded-full bg-blue-400"
-                      animate={{ opacity: [0.3, 1, 0.3], y: [0, -4, 0] }}
+                      className="w-1.5 h-1.5 rounded-full bg-accent"
+                      animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1.1, 0.8] }}
                       transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                     />
                   ))}
@@ -803,7 +808,7 @@ export function AssistantScreen() {
             <button
               key={action}
               onClick={() => sendMessage(action)}
-              className="glass-card px-4 py-2 rounded-full text-xs font-semibold text-slate-300 whitespace-nowrap hover:bg-white/[0.08] active:scale-95 transition-all"
+              className="bg-card border border-border-subtle shadow-sm px-4 py-2 rounded-full text-xs font-semibold text-text-sub whitespace-nowrap hover:bg-accent/10 hover:border-accent/30 active:scale-95 transition-all"
             >
               {action}
             </button>
@@ -815,18 +820,18 @@ export function AssistantScreen() {
       <AnimatePresence>
         {isListening && (
           <motion.div
-            className="absolute inset-0 bg-[#0b1120]/95 z-50 flex flex-col items-center justify-center"
+            className="absolute inset-0 bg-surface/95 z-50 flex flex-col items-center justify-center"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
             <div className="relative mb-6">
-              <div className="absolute inset-0 w-32 h-32 bg-blue-500/20 rounded-full blur-2xl animate-pulse" />
+              <div className="absolute inset-0 w-32 h-32 bg-accent/20 rounded-full blur-2xl animate-pulse" />
               <div className="relative flex items-end justify-center gap-1.5 h-24 w-48">
                 {[20, 35, 50, 40, 55, 30, 45, 25, 15].map((height, i) => (
                   <motion.div
                     key={i}
-                    className="w-1.5 bg-gradient-to-t from-blue-500 to-cyan-400 rounded-full"
+                    className="w-1.5 bg-gradient-to-t from-accent to-accent/70 rounded-full"
                     animate={{ height: [height * 0.3, height, height * 0.3] }}
                     transition={{ duration: 0.8 + i * 0.1, repeat: Infinity, ease: "easeInOut" }}
                   />
@@ -837,7 +842,7 @@ export function AssistantScreen() {
             {/* Live transcript */}
             {liveTranscript && (
               <motion.p
-                className="text-white text-sm font-medium mb-4 px-6 text-center max-w-[80%]"
+                className="text-text-main text-sm font-medium mb-4 px-6 text-center max-w-[80%]"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
               >
@@ -845,14 +850,14 @@ export function AssistantScreen() {
               </motion.p>
             )}
 
-            <span className="text-blue-400/80 text-xs font-bold uppercase tracking-[0.3em] animate-pulse mb-6">
+            <span className="text-accent/80 text-xs font-bold uppercase tracking-[0.3em] animate-pulse mb-6">
               {liveTranscript ? 'Hearing you...' : 'Listening...'}
             </span>
             <button
               onClick={toggleListening}
               className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center active:scale-90 transition-transform shadow-[0_0_20px_rgba(239,68,68,0.4)]"
             >
-              <MicOff size={24} className="text-white" />
+              <MicOff size={24} className="text-text-main" />
             </button>
           </motion.div>
         )}
@@ -862,7 +867,7 @@ export function AssistantScreen() {
       <AnimatePresence>
         {isSpeaking && (
           <motion.div
-            className="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-blue-500/15 backdrop-blur-xl border border-blue-500/20 rounded-full px-4 py-2 flex items-center gap-2"
+            className="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-accent/15 backdrop-blur-xl border border-accent/20 rounded-full px-4 py-2 flex items-center gap-2"
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -871,14 +876,14 @@ export function AssistantScreen() {
               {[0, 1, 2, 3].map(i => (
                 <motion.div
                   key={i}
-                  className="w-1 bg-blue-400 rounded-full"
+                  className="w-1 bg-accent rounded-full"
                   animate={{ height: [4, 12, 4] }}
                   transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
                 />
               ))}
             </div>
-            <span className="text-[11px] font-semibold text-blue-300">EcoBot speaking</span>
-            <button onClick={stopSpeaking} className="ml-1 text-blue-300 hover:text-white transition-colors">
+            <span className="text-[11px] font-semibold text-accent/80">EcoBot speaking</span>
+            <button onClick={stopSpeaking} className="ml-1 text-accent/80 hover:text-text-main transition-colors">
               <VolumeX size={14} />
             </button>
           </motion.div>
@@ -894,18 +899,18 @@ export function AssistantScreen() {
             className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 active:scale-95 transition-all ${
               isListening
                 ? 'bg-red-500/20 border border-red-500/30 text-red-400'
-                : 'bg-blue-500/15 border border-blue-500/20 text-blue-400 hover:bg-blue-500/25'
+                : 'bg-accent/15 border border-accent/20 text-accent hover:bg-accent/25'
             }`}
           >
             {isListening ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
-          <div className="flex-1 glass-card rounded-2xl flex items-center px-4 py-3 focus-within:border-blue-500/30 transition-colors">
+          <div className="flex-1 bg-card border border-border-subtle shadow-sm rounded-2xl flex items-center px-4 py-3 focus-within:border-accent/30 transition-colors">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder={isListening ? 'Listening...' : 'Ask EcoBot anything...'}
-              className="bg-transparent border-none focus:outline-none text-white placeholder:text-slate-500 w-full text-sm font-medium"
+              className="bg-transparent border-none focus:outline-none text-text-main placeholder:text-text-sub w-full text-sm font-medium"
               disabled={isListening}
             />
           </div>
@@ -923,7 +928,7 @@ export function AssistantScreen() {
               type="submit"
               disabled={!inputText.trim() || isListening}
               className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 active:scale-95 transition-all ${
-                inputText.trim() ? 'bg-blue-500 text-white shadow-[0_4px_15px_rgba(59,130,246,0.3)]' : 'bg-white/[0.05] text-slate-600'
+                inputText.trim() ? 'bg-accent text-text-inverse shadow-[0_4px_15px_rgba(107,142,94,0.3)]' : 'bg-border-subtle text-text-sub'
               }`}
             >
               <Send size={16} />

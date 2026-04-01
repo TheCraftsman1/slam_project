@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, createContext, useContext } from 'react';
 import type { AqiStation, AddStationOptions, IareCollegeData } from '../types';
 import type { AiInsightState } from '../services/aiService';
 import { fetchAqiForLocation } from '../services/aqiService';
@@ -14,7 +14,7 @@ export interface InitProgress {
   done: boolean;
 }
 
-export function useAqiData() {
+function useAqiDataInternal() {
   const [stations, setStations] = useState<AqiStation[]>([]);
   const [selectedStation, setSelectedStation] = useState<AqiStation | null>(null);
   const [iareCollege, setIareCollege] = useState<IareCollegeData>(DEFAULT_IARE_COLLEGE);
@@ -81,8 +81,8 @@ export function useAqiData() {
     const shouldAutoSelect = opts?.autoSelect !== false;
     const id = `${lat.toFixed(4)}_${lng.toFixed(4)}`;
 
-    // Check for duplicates
-    const existingStation = stations.find(s => Math.abs(s.lat - lat) < 0.005 && Math.abs(s.lng - lng) < 0.005);
+    // Check for duplicates (group within ~11 meters)
+    const existingStation = stations.find(s => s.id === id);
     if (existingStation) {
       if (shouldAutoSelect) {
         setSelectedStation(existingStation);
@@ -164,6 +164,41 @@ export function useAqiData() {
       setSelectedStation(null);
     }
   }, [selectedStation]);
+  
+  // Refresh User Location (Re-detect)
+  const refreshLocation = useCallback(async () => {
+    setInitProgress({ step: 0, total: 1, label: 'Re-detecting location...', done: false });
+    
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const { latitude: lat, longitude: lon } = pos.coords;
+          const name = await reverseGeocode(lat, lon);
+          // Remove old user location if exists
+          setStations(prev => prev.filter(s => !s.isUserLocation));
+          await addStation(lat, lon, name, { isUserLocation: true, autoSelect: true });
+          setInitProgress({ step: 1, total: 1, label: 'Location Updated', done: true });
+        },
+        async () => {
+          // IP Fallback
+          try {
+            const resp = await fetch('https://ipapi.co/json/');
+            const data = await resp.json();
+            if (data.latitude && data.longitude && data.city) {
+              setStations(prev => prev.filter(s => !s.isUserLocation));
+              await addStation(data.latitude, data.longitude, data.city, { isUserLocation: true, autoSelect: true });
+              setInitProgress({ step: 1, total: 1, label: 'Location Updated (IP)', done: true });
+              return;
+            }
+          } catch (e) {}
+          setInitProgress({ step: 1, total: 1, label: 'Detection failed', done: true });
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    } else {
+      setInitProgress({ step: 1, total: 1, label: 'Not supported', done: true });
+    }
+  }, [addStation]);
 
   // Select a station
   const selectStation = useCallback((station: AqiStation) => {
@@ -174,53 +209,57 @@ export function useAqiData() {
   // Initialize with user location and preload cities
   const initialize = useCallback(async () => {
     const totalSteps = PRELOAD_CITIES.length + 1; // +1 for user location
-
     setInitProgress({ step: 0, total: totalSteps, label: 'Detecting your location...', done: false });
-      // HARDCODED IARE 5TH BLOCK INIT
-      setTimeout(async () => {
-        setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
-        const name = "5th Block, IARE"; 
-        await addStationRef.current(17.599799, 78.418182, name, { isUserLocation: true });
 
-        // Load preload cities
-        for (let i = 0; i < PRELOAD_CITIES.length; i++) {
-          await new Promise(r => setTimeout(r, 400));
-          const c = PRELOAD_CITIES[i];
-          setInitProgress({ step: i + 2, total: totalSteps, label: `Loading ${c.name}...`, done: false });
-          await addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
-        }
+    const loadPreloadCities = async () => {
+      for (let i = 0; i < PRELOAD_CITIES.length; i++) {
+        await new Promise(r => setTimeout(r, 400));
+        const c = PRELOAD_CITIES[i];
+        setInitProgress({ step: i + 2, total: totalSteps, label: `Loading ${c.name}...`, done: false });
+        await addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
+      }
+      setInitProgress(prev => ({ ...prev, done: true }));
+    };
 
-        setInitProgress(prev => ({ ...prev, done: true }));
-      }, 500);
-      /* ORIGINAL CODE COMMENTED OUT    if ("geolocation" in navigator) {
+    if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           const { latitude: lat, longitude: lon } = pos.coords;
           setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
           const name = await reverseGeocode(lat, lon);
-          addStationRef.current(lat, lon, name, { isUserLocation: true });
+          await addStationRef.current(lat, lon, name, { isUserLocation: true });
+          await loadPreloadCities();
         },
         async () => {
-          setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
-          addStationRef.current(17.6868, 83.2185, 'Visakhapatnam', { isUserLocation: true });
+          try {
+            setInitProgress({ step: 1, total: totalSteps, label: 'Estimating location...', done: false });
+            const resp = await fetch('https://ipapi.co/json/');
+            const data = await resp.json();
+            if (data.latitude && data.longitude && data.city) {
+              await addStationRef.current(data.latitude, data.longitude, data.city, { isUserLocation: true });
+              await loadPreloadCities();
+              return;
+            }
+          } catch (e) {
+            // Silently continue to preloaded cities
+          }
+          await loadPreloadCities();
         },
-//         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-//       );
-//     } else {
-//       setInitProgress({ step: 1, total: totalSteps, label: 'Fetching local AQI...', done: false });
-//       addStationRef.current(17.6868, 83.2185, 'Visakhapatnam', { isUserLocation: true });
-//     }
-
-//     // Load preload cities
-//     for (let i = 0; i < PRELOAD_CITIES.length; i++) {
-//       await new Promise(r => setTimeout(r, 400));
-//       const c = PRELOAD_CITIES[i];
-//       setInitProgress({ step: i + 2, total: totalSteps, label: `Loading ${c.name}...`, done: false });
-//       addStationRef.current(c.lat, c.lng, c.name, { autoSelect: false });
-//     }
-
-//     setInitProgress(prev => ({ ...prev, done: true }));
-//     */
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    } else {
+      try {
+        setInitProgress({ step: 1, total: totalSteps, label: 'Estimating location...', done: false });
+        const resp = await fetch('https://ipapi.co/json/');
+        const data = await resp.json();
+        if (data.latitude && data.longitude && data.city) {
+          await addStationRef.current(data.latitude, data.longitude, data.city, { isUserLocation: true });
+          await loadPreloadCities();
+          return;
+        }
+      } catch (e) {}
+      await loadPreloadCities();
+    }
   }, []);
 
   return {
@@ -233,9 +272,32 @@ export function useAqiData() {
     addStation,
     addStationRef,
     refreshStation,
+    refreshLocation,
     removeStation,
     selectStation,
     setSelectedStation,
     initialize,
   };
+}
+
+type AqiContextType = ReturnType<typeof useAqiDataInternal>;
+
+const AqiContext = createContext<AqiContextType | null>(null);
+
+export function AqiProvider({ children }: { children: React.ReactNode }) {
+  const data = useAqiDataInternal();
+
+  useEffect(() => {
+    data.initialize();
+  }, [data.initialize]);
+
+  return <AqiContext.Provider value={data}>{children}</AqiContext.Provider>;
+}
+
+export function useAqiData() {
+  const context = useContext(AqiContext);
+  if (!context) {
+    throw new Error('useAqiData must be used within an AqiProvider');
+  }
+  return context;
 }

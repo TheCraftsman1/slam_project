@@ -16,13 +16,14 @@ interface SearchBarProps {
 }
 
 const ResultIcon = ({ type }: { type: SearchResultType }) => {
+  const iconClass = "w-4 h-4";
   switch (type) {
-    case 'city': return <MapPin className="text-blue-400" size={16} />;
-    case 'building': return <Building2 className="text-emerald-400" size={16} />;
-    case 'address': return <MapPin className="text-orange-400" size={16} />;
-    case 'coordinates': return <Crosshair className="text-purple-400" size={16} />;
-    case 'recent': return <Clock className="text-slate-400" size={16} />;
-    default: return <Navigation className="text-slate-400" size={16} />;
+    case 'city': return <MapPin className={`text-blue-400 ${iconClass}`} />;
+    case 'building': return <Building2 className={`text-emerald-400 ${iconClass}`} />;
+    case 'address': return <MapPin className={`text-orange-400 ${iconClass}`} />;
+    case 'coordinates': return <Crosshair className={`text-purple-400 ${iconClass}`} />;
+    case 'recent': return <Clock className={`text-slate-400 ${iconClass}`} />;
+    default: return <Navigation className={`text-slate-400 ${iconClass}`} />;
   }
 };
 
@@ -42,7 +43,6 @@ export function SearchBar({
 
   const { suggestions, addRecentSearch } = useAutocomplete(searchQuery, iareCollege, isMapLoaded);
 
-  // Click outside to close
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -67,33 +67,20 @@ export function SearchBar({
       alert('Voice search is not supported in your browser.');
       return;
     }
-    
     // @ts-ignore
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-    
+    recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       onSearchQueryChange(transcript);
       if (onSearch) {
-        // mock form submit
         onSearch({ preventDefault: () => {} } as React.FormEvent);
       }
       setIsListening(false);
     };
-    
-    recognition.onerror = () => {
-      setIsListening(false);
-    };
-    
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
     recognition.start();
   };
 
@@ -107,15 +94,19 @@ export function SearchBar({
           setIsFocused(false);
           onSearch?.(e);
         }}
-        className={`bg-[#141820]/95 backdrop-blur-2xl border border-white/[0.08] flex items-center px-4 py-3.5 shadow-2xl transition-all ${showDropdown ? 'rounded-t-2xl rounded-b-none' : 'rounded-2xl'} focus-within:border-blue-500/40 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.1)]`}
+        className={`bg-card flex items-center px-4 py-3 shadow-sm border border-border-subtle transition-all duration-250 ${
+          showDropdown ? 'rounded-t-2xl rounded-b-none' : 'rounded-2xl'
+        } ${
+          isFocused ? 'border-accent shadow-minimal' : ''
+        }`}
       >
         {isSearching ? (
-          <Loader2 className="text-blue-400 mr-3 animate-spin" size={18} />
+          <Loader2 className="text-accent mr-3 animate-spin flex-shrink-0" size={18} />
         ) : (
-          <Search className="text-slate-500 mr-3" size={18} />
+          <Search className="text-slate-500 mr-3 flex-shrink-0" size={18} />
         )}
         <input
-          className="bg-transparent border-none focus:outline-none text-white placeholder:text-slate-500 w-full text-sm font-medium"
+          className="bg-transparent border-none focus:outline-none text-text-main placeholder:text-text-sub w-full text-[13px] font-medium"
           placeholder="Search cities or IARE buildings..."
           type="text"
           value={searchQuery}
@@ -129,32 +120,32 @@ export function SearchBar({
               onClear();
               setIsFocused(true);
             }}
-            className="text-slate-400 hover:text-white mr-2 transition-colors"
+            className="text-text-sub hover:text-text-main mr-2 transition-colors flex-shrink-0 active:scale-90"
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         )}
-        <button type="button" onClick={handleVoiceSearch} className="focus:outline-none">
+        <button type="button" onClick={handleVoiceSearch} className="focus:outline-none flex-shrink-0 ml-1">
           {isListening ? (
-            <span className="relative flex h-4 w-4 ml-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500"></span>
+            <span className="relative flex h-4 w-4">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+              <span className="relative inline-flex rounded-full h-4 w-4 bg-accent" />
             </span>
           ) : (
-            <Mic className="text-slate-500 ml-2 cursor-pointer hover:text-blue-400 transition-colors" size={18} />
+            <Mic className="text-text-sub cursor-pointer hover:text-accent transition-colors" size={17} />
           )}
         </button>
       </form>
 
-      {/* Autocomplete Dropdown */}
+      {/* ── Autocomplete Dropdown ── */}
       <AnimatePresence>
         {showDropdown && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            className="absolute top-full left-0 w-full bg-[#141820]/95 backdrop-blur-2xl border border-t-0 border-white/[0.08] rounded-b-2xl overflow-hidden shadow-2xl z-50 transform origin-top"
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-full left-0 w-full bg-card rounded-b-2xl overflow-hidden shadow-minimal border border-border-subtle z-50 border-t-0"
           >
             <div className="max-h-80 overflow-y-auto">
               {suggestions.length > 0 ? (
@@ -163,16 +154,16 @@ export function SearchBar({
                     key={`${suggestion.id}-${index}`}
                     type="button"
                     onClick={() => handleSelect(suggestion)}
-                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/[0.05] transition-colors text-left border-b border-white/[0.02] last:border-none"
+                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-surface transition-colors text-left border-b border-border-subtle last:border-none group"
                   >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-800/50 flex items-center justify-center">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-surface flex items-center justify-center group-hover:bg-border-subtle transition-colors">
                       <ResultIcon type={suggestion.type} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-white truncate">
+                      <div className="text-[13px] font-medium text-text-main truncate">
                         {suggestion.primaryText}
                       </div>
-                      <div className="text-xs text-slate-400 truncate">
+                      <div className="text-[11px] text-text-sub truncate">
                         {suggestion.secondaryText}
                       </div>
                     </div>
@@ -180,18 +171,17 @@ export function SearchBar({
                 ))
               ) : (
                 <div className="px-6 py-10 flex flex-col items-center justify-center text-center">
-                  <div className="w-12 h-12 rounded-full bg-white/[0.03] flex items-center justify-center mb-3">
-                    <Search className="text-slate-600" size={20} />
+                  <div className="w-11 h-11 rounded-2xl bg-surface flex items-center justify-center mb-3">
+                    <Search className="text-text-sub" size={18} />
                   </div>
-                  <p className="text-sm font-medium text-slate-300">No results found for "{searchQuery}"</p>
-                  <p className="text-xs text-slate-500 mt-1">Try check for typos or use different keywords.</p>
+                  <p className="text-[13px] font-medium text-text-main">No results for "{searchQuery}"</p>
+                  <p className="text-[11px] text-text-sub mt-1">Check for typos or try different keywords.</p>
                 </div>
               )}
             </div>
             
-            {/* Footer indicator if showing recent */}
             {!searchQuery && suggestions.some(s => s.type === 'recent') && (
-              <div className="px-4 py-2 bg-black/20 text-[10px] uppercase font-bold tracking-wider text-slate-500">
+              <div className="px-4 py-2 bg-surface text-[9px] uppercase font-bold tracking-[0.16em] text-text-sub">
                 Recent Searches
               </div>
             )}
