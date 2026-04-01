@@ -1,8 +1,9 @@
 import React from 'react';
-import { MapPin, Wind, Navigation, AlertTriangle, ShieldCheck, MessageSquare, RefreshCcw, Loader2 } from 'lucide-react';
+import { MapPin, Wind, Navigation, AlertTriangle, ShieldCheck, MessageSquare, RefreshCcw, Loader2, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAqiData } from '../hooks';
-import { SkeletonHomeScreen } from './ui';
+import { SkeletonHomeScreen, PersonalizedAqiAdvice } from './ui';
+import { HealthImpactWidget } from './HealthImpactWidget';
 
 export function HomeScreen({ onNavigate }: { onNavigate: (tab: any) => void }) {
   const { stations, selectedStation, initProgress, refreshLocation } = useAqiData();
@@ -73,7 +74,7 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: any) => void }) {
       {/* Hero AQI Card */}
       <motion.div
         onClick={() => onNavigate('details')}
-        className={`cursor-pointer w-full max-w-md ${gradientClass} rounded-[32px] p-8 flex flex-col items-center justify-center shadow-minimal mb-6 relative overflow-hidden transition-transform active:scale-[0.98]`}
+        className={`cursor-pointer w-full max-w-md ${gradientClass} rounded-[32px] p-8 flex flex-col items-center justify-center shadow-minimal mb-3 relative overflow-hidden transition-transform active:scale-[0.98]`}
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
@@ -85,14 +86,14 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: any) => void }) {
           <h2 className="text-[110px] sm:text-[120px] font-display font-bold leading-none tracking-tighter mix-blend-overlay">
             {aqi}
           </h2>
-          <div className="bg-black/15 backdrop-blur-md px-4 py-1.5 rounded-full mt-4 mb-6 transition-transform hover:scale-105">
+          <div className="bg-black/15 backdrop-blur-md px-4 py-1.5 rounded-full mt-4 transition-transform hover:scale-105">
             <span className="text-sm font-bold tracking-wide">{statusText}</span>
           </div>
-          <p className="text-center text-sm font-medium opacity-90 max-w-[260px] leading-relaxed">
-            {advice}
-          </p>
         </div>
       </motion.div>
+
+      {/* Personalized AI Advice Widget */}
+      <PersonalizedAqiAdvice aqi={aqi} />
 
       {/* Stats Row */}
       <div className="w-full max-w-md grid grid-cols-3 gap-3 mb-8">
@@ -136,6 +137,34 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: any) => void }) {
           Ask EcoBot
         </motion.button>
       </div>
+
+      {/* Passive Smoke Equivalence Tracker */}
+      <HealthImpactWidget pm25={pm25} />
+
+      {/* AQI Awareness Teaser */}
+      <motion.div
+        onClick={() => onNavigate('aqi-awareness')}
+        className="w-full max-w-md mt-6 p-5 bg-card border border-border-subtle rounded-3xl shadow-sm cursor-pointer flex flex-col hover:border-accent/40 active:scale-[0.98] transition-all relative overflow-hidden"
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.2 }}
+      >
+        <div className="absolute top-0 right-0 w-32 h-32 bg-sky-400/5 rounded-full blur-2xl -mr-10 -mt-10" />
+        
+        <div className="flex items-center justify-between z-10">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-accent mb-1 block">Learn AQI Fast</span>
+            <h3 className="text-lg font-display font-bold text-text-main">Air Quality Guide</h3>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-surface border border-border-strong flex items-center justify-center text-text-sub">
+            <ArrowRight size={16} />
+          </div>
+        </div>
+        
+        <p className="text-sm text-text-sub mt-2 leading-relaxed max-w-[280px] z-10">
+          Curious about AQI colors and numbers? Learn how to make safer choices outdoors.
+        </p>
+      </motion.div>
       
       {/* Offline Mode Indicator */}
       {isOfflineData && (

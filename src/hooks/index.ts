@@ -3,3 +3,4 @@ export { useGeolocation } from './useGeolocation';
 export { useMapControls } from './useMapControls';
 export { useOnlineStatus } from './useOnlineStatus';
 export * from './useAutocomplete';
+export * from './useUserProfile';

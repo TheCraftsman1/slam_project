@@ -1,18 +1,36 @@
 import { useState, type ReactNode } from 'react';
-import { Bell, Shield, Sparkles, Volume2, Moon, Sun, Monitor } from 'lucide-react';
+import { Bell, Shield, Sparkles, Volume2, Moon, Sun, Monitor, Activity, UserCircle, Wind, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTheme } from './ui/ThemeProvider';
+import { useUserProfile } from '../hooks';
+import type { AgeGroup, ActivityLevel, HealthCondition, ExposurePattern, Sensitivity } from '../types';
 
-type Sensitivity = 'General' | 'Sensitive' | 'Asthma';
 type StartScreen = 'Outdoor' | 'Map' | 'Ask';
 type ThemeOption = 'light' | 'dark' | 'system';
 
 export function ProfileScreen() {
   const { theme, setTheme } = useTheme();
-  const [sensitivity, setSensitivity] = useState<Sensitivity>('Sensitive');
+  const { profile, updateProfile, riskCategory } = useUserProfile();
+  
   const [startScreen, setStartScreen] = useState<StartScreen>('Outdoor');
   const [morningBrief, setMorningBrief] = useState(true);
   const [voiceReplies, setVoiceReplies] = useState(false);
+
+  const toggleCondition = (condition: HealthCondition) => {
+    let newConditions = [...profile.conditions];
+    if (condition === 'None') {
+      newConditions = ['None'];
+    } else {
+      newConditions = newConditions.filter(c => c !== 'None');
+      if (newConditions.includes(condition)) {
+        newConditions = newConditions.filter(c => c !== condition);
+        if (newConditions.length === 0) newConditions = ['None'];
+      } else {
+        newConditions.push(condition);
+      }
+    }
+    updateProfile({ conditions: newConditions });
+  };
 
   return (
     <div className="min-h-full bg-surface px-5 pt-8 pb-32 text-text-main">
@@ -84,31 +102,125 @@ export function ProfileScreen() {
           </div>
         </motion.section>
 
-        {/* ── Sensitivity ── */}
+        {/* ── Health & Lifestyle Profile ── */}
         <motion.section
-          className="rounded-[22px] bg-card border border-border-subtle p-4 shadow-sm"
+          className="rounded-[22px] bg-card border border-border-subtle p-5 shadow-sm space-y-6"
           initial={{ y: 16, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.08 }}
         >
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-sub">Sensitivity</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(['General', 'Sensitive', 'Asthma'] as Sensitivity[]).map((option) => {
-              const isActive = sensitivity === option;
-              return (
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-text-main flex items-center gap-2">
+              <UserCircle size={18} className="text-accent" />
+              Personal Profile
+            </h2>
+            <span className="bg-accent/10 text-accent px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide">
+              {riskCategory}
+            </span>
+          </div>
+
+          {/* Age Group */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-sub mb-3">Age Group</p>
+            <div className="flex flex-wrap gap-2">
+              {(['Child', 'Teen', 'Adult', 'Senior'] as AgeGroup[]).map((option) => (
                 <button
                   key={option}
-                  onClick={() => setSensitivity(option)}
+                  onClick={() => updateProfile({ ageGroup: option })}
                   className={`rounded-full border px-4 py-2 text-[12px] font-semibold transition-all duration-200 active:scale-95 ${
-                    isActive
+                    profile.ageGroup === option
                       ? 'border-accent bg-accent/10 text-text-main shadow-minimal'
-                      : 'border-border-subtle bg-surface text-text-sub hover:bg-border-subtle hover:text-text-main'
+                      : 'border-border-subtle bg-surface text-text-sub hover:bg-border-subtle'
                   }`}
                 >
                   {option}
                 </button>
-              );
-            })}
+              ))}
+            </div>
+          </div>
+
+          {/* Health Conditions */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-sub mb-3">Health Conditions</p>
+            <div className="flex flex-wrap gap-2">
+              {(['Asthma', 'Breathing issues', 'Heart conditions', 'Allergies', 'None'] as HealthCondition[]).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => toggleCondition(option)}
+                  className={`rounded-full border px-4 py-2 text-[12px] font-semibold transition-all duration-200 active:scale-95 ${
+                    profile.conditions.includes(option)
+                      ? 'border-rose-500/50 bg-rose-500/10 text-rose-600 dark:text-rose-400 shadow-minimal'
+                      : 'border-border-subtle bg-surface text-text-sub hover:bg-border-subtle'
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Activity Level */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-sub mb-3">Outdoor Activity Level</p>
+            <div className="flex flex-wrap gap-2">
+              {(['Sedentary', 'Moderate', 'Active'] as ActivityLevel[]).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => updateProfile({ activityLevel: option })}
+                  className={`rounded-full border px-4 py-2 text-[12px] font-semibold transition-all duration-200 active:scale-95 flex items-center gap-1 ${
+                    profile.activityLevel === option
+                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-minimal'
+                      : 'border-border-subtle bg-surface text-text-sub hover:bg-border-subtle'
+                  }`}
+                >
+                  <Activity size={12} />
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Outdoor Exposure */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-sub mb-3">Daily Time Outdoors</p>
+            <div className="flex flex-wrap gap-2">
+              {(['< 1 hour', '1-3 hours', '3+ hours'] as ExposurePattern[]).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => updateProfile({ exposure: option })}
+                  className={`rounded-full border px-4 py-2 text-[12px] font-semibold transition-all duration-200 active:scale-95 flex items-center gap-1 ${
+                    profile.exposure === option
+                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400 shadow-minimal'
+                      : 'border-border-subtle bg-surface text-text-sub hover:bg-border-subtle'
+                  }`}
+                >
+                  <Clock size={12} />
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Sensitivity */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-sub mb-3 flex items-center gap-1">
+              Self-Reported Sensitivity
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(['Low', 'Medium', 'High'] as Sensitivity[]).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => updateProfile({ sensitivity: option })}
+                  className={`rounded-full border px-4 py-2 text-[12px] font-semibold transition-all duration-200 active:scale-95 ${
+                    profile.sensitivity === option
+                      ? 'border-accent bg-accent/10 text-text-main shadow-minimal'
+                      : 'border-border-subtle bg-surface text-text-sub hover:bg-border-subtle'
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
           </div>
         </motion.section>
 

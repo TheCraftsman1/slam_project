@@ -11,3 +11,4 @@ export {
   SkeletonBottomSheetHeader,
   SkeletonHomeScreen,
 } from './Skeleton';
+export { PersonalizedAqiAdvice } from './PersonalizedAqiAdvice';

@@ -5,6 +5,7 @@ import { MapScreen } from './components/MapScreen';
 import { AssistantScreen } from './components/AssistantScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { IndoorScreen } from './components/IndoorScreen';
+import { AqiAwarenessScreen } from './components/AqiAwarenessScreen';
 import { motion, AnimatePresence } from 'motion/react';
 import { ToastProvider, ErrorBoundary, OfflineBanner } from './components/ui';
 import { ThemeProvider } from './components/ui/ThemeProvider';
@@ -12,7 +13,7 @@ import { useOnlineStatus, AqiProvider } from './hooks';
 
 import { LocationDetailScreen } from './components/LocationDetailScreen';
 
-type AppTab = 'home' | 'indoor' | 'assistant' | 'map' | 'profile' | 'details';
+type AppTab = 'home' | 'indoor' | 'assistant' | 'map' | 'profile' | 'details' | 'aqi-awareness';
 
 type TabItem = {
   id: AppTab;
@@ -60,12 +61,13 @@ export default function App() {
                   {activeTab === 'assistant' && <AssistantScreen />}
                   {activeTab === 'profile' && <ProfileScreen />}
                   {activeTab === 'details' && <LocationDetailScreen onNavigate={setActiveTab} />}
+                  {activeTab === 'aqi-awareness' && <AqiAwarenessScreen onNavigate={setActiveTab} />}
                 </motion.div>
               </AnimatePresence>
             </div>
 
             {/* Bottom Navigation */}
-            {activeTab !== 'details' && (
+            {(activeTab !== 'details' && activeTab !== 'aqi-awareness') && (
             <div className="relative z-50 bg-surface/90 backdrop-blur-xl border-t border-border-subtle transition-colors duration-300">
               <nav className="flex items-center justify-between px-6 pb-6 pt-3 max-w-md mx-auto">
                 {tabs.map(({ id, label, Icon }) => {
